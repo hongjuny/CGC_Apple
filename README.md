@@ -1,10 +1,13 @@
 # CGC Apple
 
-A small Apple II emulator for macOS, started as a nostalgia project in memory of
-the Apple II clones built and sold around Seoul's Cheonggyecheon electronics
-market in the 1980s. **CGC** stands for **C**heon**g**gye**c**heon, the market where
-so many Korean kids got their first "Apple". It is written from scratch: a
-portable C core plus a thin Swift/AppKit front end.
+> 1980년대 한국 애플 II 클론의 발상지, 청계천.
+> 애플 키드라면 한 번쯤 순례하던 그 성지를, 이제 당신의 Mac 위에.
+
+In 1980s Korea, the road to the Apple II ran through **Cheonggyecheon**.
+Seoul's electronics market was the birthplace of Korean Apple II clones and
+a pilgrimage for a generation of Apple kids. **CGC Apple** brings that spirit
+to the Mac: an Apple II emulator written from scratch, with a portable C core
+and a thin Swift/AppKit front end. **CGC** stands for **C**heon**g**gye**c**heon.
 
 ## Features
 
