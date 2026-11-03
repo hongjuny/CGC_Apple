@@ -18,14 +18,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private static let romDirKey = "romDirectory"
     private static let modelKey = "model"
     private static let mockingboardCountKey = "mockingboardCount"
-    private static let midiSlotKey = "midiSlot"
     private static let realDiskSpeedKey = "realDiskSpeed"
     private static let scanlinesKey = "scanlines"
     private static let joystickKey = "joystickMode"
-    private static let passportSlot = 2
     private static let ramWorksKey = "ramWorksEnabled"
     private static let ramFactorKey = "ramFactorEnabled"
     private static let hardDiskKey = "hardDiskPath"
+    private static let fujiNetKey = "fujiNetEnabled"
+    private static let mouseCardKey = "mouseCard"
 
     private static func savedModel() -> a2_model {
         let raw = UInt32(UserDefaults.standard.integer(forKey: modelKey))
@@ -79,7 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         // Disk images passed on the command line: floppies go into drives 1 and 2,
         // a hard disk image is mounted in slot 7.
         let args = CommandLine.arguments.dropFirst().map { URL(fileURLWithPath: $0) }
-            .filter { ["dsk", "do", "po", "nib", "woz", "hdv", "2mg"].contains($0.pathExtension.lowercased()) }
+            .filter { Emulator.imageExtensions.contains($0.pathExtension.lowercased()) }
         let floppies = args.filter { !Emulator.isHardDiskImage($0) }
         for (i, url) in floppies.prefix(2).enumerated() {
             insert(url, drive: i)
@@ -270,6 +270,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if let hd = emulator.hardDiskURL { status += "   HD: \(hd.lastPathComponent)" }
         if emulator.motorOn { status += "   ● D\(emulator.activeDrive + 1)" }
         if emulator.hardDiskActive { status += "   ● HD" }
+        if let devices = emulator.fujiNetDevices {
+            status += devices == 0 ? "   FujiNet: waiting" : "   FujiNet: \(devices) devices"
+            if emulator.fujiNetActive { status += " ●" }
+        }
         if status != lastStatus {
             window.subtitle = status
             lastStatus = status
@@ -295,7 +299,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func chooseDisk(drive: Int) {
         let panel = NSOpenPanel()
         panel.message = "Disk image for drive \(drive + 1)"
-        panel.allowedContentTypes = ["dsk", "do", "po", "nib", "woz"].compactMap { UTType(filenameExtension: $0) }
+        panel.allowedContentTypes = Emulator.imageExtensions.compactMap { UTType(filenameExtension: $0) }
         panel.allowsOtherFileTypes = true
         if panel.runModal() == .OK, let url = panel.url {
             insert(url, drive: drive)
@@ -318,7 +322,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc private func chooseHardDisk() {
         let panel = NSOpenPanel()
         panel.message = "Hard disk image for slot 7 (ProDOS order)"
-        panel.allowedContentTypes = ["hdv", "po", "2mg"].compactMap { UTType(filenameExtension: $0) }
+        panel.allowedContentTypes = Emulator.imageExtensions.compactMap { UTType(filenameExtension: $0) }
         panel.allowsOtherFileTypes = true
         if panel.runModal() == .OK, let url = panel.url {
             mountHardDisk(url)
@@ -384,18 +388,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         sender.state = emulator.capsLock ? .on : .off
     }
 
-    @objc private func togglePassportMIDI(_ sender: NSMenuItem) {
-        let slot = emulator.setMIDISlot(emulator.midiSlot == 0 ? Self.passportSlot : 0)
-        UserDefaults.standard.set(slot, forKey: Self.midiSlotKey)
-        sender.state = slot != 0 ? .on : .off
+    @objc private func toggleMockingboard(_ sender: NSMenuItem) {
+        emulator.mockingboards = emulator.mockingboards == 0 ? 1 : 0
+        UserDefaults.standard.set(emulator.mockingboards, forKey: Self.mockingboardCountKey)
+        sender.state = emulator.mockingboards != 0 ? .on : .off
     }
 
-    @objc private func selectMockingboards(_ sender: NSMenuItem) {
-        emulator.mockingboards = sender.tag
-        UserDefaults.standard.set(sender.tag, forKey: Self.mockingboardCountKey)
-        sender.menu?.items.forEach {
-            if $0.action == #selector(selectMockingboards(_:)) { $0.state = $0 == sender ? .on : .off }
+    @objc private func toggleMouseCard(_ sender: NSMenuItem) {
+        emulator.mouseCard.toggle()
+        UserDefaults.standard.set(emulator.mouseCard, forKey: Self.mouseCardKey)
+        sender.state = emulator.mouseCard ? .on : .off
+    }
+
+    @objc private func toggleFujiNet(_ sender: NSMenuItem) {
+        do {
+            try emulator.setFujiNet(!emulator.fujiNetEnabled)
+        } catch {
+            NSAlert(error: error).runModal()
         }
+        UserDefaults.standard.set(emulator.fujiNetEnabled, forKey: Self.fujiNetKey)
+        sender.state = emulator.fujiNetEnabled ? .on : .off
     }
 
     @objc private func toggleMemoryCard(_ sender: NSMenuItem) {
@@ -510,17 +522,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let caps = item("Caps Lock", #selector(toggleCapsLock(_:)), "k", [.command, .shift])
         caps.state = emulator.capsLock ? .on : .off
         let saved = UserDefaults.standard.object(forKey: Self.mockingboardCountKey) as? Int
-        emulator.mockingboards = min(max(saved ?? 1, 0), 2)
-        let boards = [("No Mockingboard", 0), ("1 Mockingboard (Slot 4)", 1), ("2 Mockingboards (Slots 4, 5)", 2)]
-            .map { title, count -> NSMenuItem in
-                let i = item(title, #selector(selectMockingboards(_:)), tag: count)
-                i.state = count == emulator.mockingboards ? .on : .off
-                return i
+        emulator.mockingboards = min(max(saved ?? 1, 0), 1)
+        let board = item("Mockingboard (Slot 4)", #selector(toggleMockingboard(_:)))
+        board.state = emulator.mockingboards != 0 ? .on : .off
+        if UserDefaults.standard.bool(forKey: Self.fujiNetKey) {
+            do {
+                try emulator.setFujiNet(true)
+            } catch {
+                UserDefaults.standard.set(false, forKey: Self.fujiNetKey)
+                NSAlert(error: error).runModal()
             }
-        emulator.setMIDISlot(UserDefaults.standard.integer(forKey: Self.midiSlotKey))
-        let passport = item("Passport MIDI (Slot 2, Built-in GM Synth)", #selector(togglePassportMIDI(_:)))
-        passport.state = emulator.midiSlot != 0 ? .on : .off
-        submenu("Model", models + [.separator(), caps, .separator()] + boards + [.separator(), passport])
+        }
+        let fujiNet = item("FujiNet (SmartPort, Slot 5; FujiNet-PC on Port \(Emulator.fujiNetPort))",
+                           #selector(toggleFujiNet(_:)))
+        fujiNet.state = emulator.fujiNetEnabled ? .on : .off
+        emulator.mouseCard = UserDefaults.standard.bool(forKey: Self.mouseCardKey)
+        let mouse = item("AppleMouse (Slot 2)", #selector(toggleMouseCard(_:)))
+        mouse.state = emulator.mouseCard ? .on : .off
+        submenu("Model", models + [.separator(), caps, .separator(), mouse, board, fujiNet])
         submenu("Memory", [
             item("RamWorks III (8 MB, IIe AUX; Restarts Machine)", #selector(toggleMemoryCard(_:)), tag: 0),
             item("RamFactor (8 MB, Slot 1; Restarts Machine)", #selector(toggleMemoryCard(_:)), tag: 1),

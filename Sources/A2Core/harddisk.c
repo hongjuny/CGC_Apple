@@ -84,8 +84,6 @@ bool a2_hd_insert(apple2 *a2, const uint8_t *data, size_t len, bool write_protec
     }
     if (size == 0 || size % 512 != 0 || size / 512 > HD_MAX_BLOCKS)
         return false;
-    if (a2->midi_slot == HD_SLOT)
-        return false;
     uint8_t *file = malloc(len);
     if (!file)
         return false;

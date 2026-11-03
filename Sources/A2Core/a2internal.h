@@ -96,28 +96,6 @@ typedef struct {
 } mockingboard;
 
 typedef struct {
-    uint8_t cr[3];                  // control registers 1-3
-    uint16_t latch[3];
-    int32_t remaining[3];           // cycles until each timer next times out
-    bool fired[3];                  // one-shot already signalled
-    uint8_t status, status_read;    // IRQ flags; flags seen by a status read
-    uint8_t msb_buffer, lsb_buffer;
-    int prescale;                   // timer 3 divide-by-8 remainder
-} ptm6840;
-
-typedef struct {
-    ptm6840 ptm;
-    uint8_t acia_control;
-    bool acia_reset;                // master reset held
-    uint8_t tdr;                    // transmit data register
-    bool tdr_full;
-    uint64_t tdr_cycle;             // when tdr was written
-    uint64_t shifter_free;          // cycle the transmit shifter becomes idle
-    uint8_t out[4096];              // MIDI bytes sent, waiting for the front end
-    size_t out_count;
-} passport_midi;
-
-typedef struct {
     uint8_t *file;                  // whole image file (2IMG header kept for saving)
     size_t file_len, data_off;      // ProDOS blocks start at data_off
     uint32_t blocks;
@@ -126,6 +104,35 @@ typedef struct {
     unsigned last_access_frame;     // for the activity indicator
     uint8_t rom[256];               // slot 7 firmware
 } harddisk;
+
+typedef struct {
+    bool enabled;
+    uint8_t rom[256];               // slot 2 firmware
+    int x, y;                       // position, inside the clamp window
+    int min_x, max_x, min_y, max_y;
+    uint8_t mode;                   // SetMouse bits
+    bool button, last_button, moved;
+    bool moved_since_vbl, button_changed;
+    uint8_t pending;                // interrupt status bits not yet served
+    uint8_t result;                 // carry of the last routine
+    float host_x, host_y;           // host pointer over the screen, 0..1
+    bool host_valid;
+} mousecard;
+
+typedef struct {
+    bool enabled;
+    int port;
+    int listen_fd, conn_fd;         // TCP: we listen, FujiNet-PC connects
+    int units;                      // devices numbered by INIT, -1 = not yet
+    uint8_t seq;                    // request sequence number
+    uint8_t *rx;                    // raw bytes received, not yet framed
+    size_t rx_len;
+    uint8_t *resp;                  // decoded response
+    uint8_t x_out, y_out;           // X/Y returned by the last call
+    bool accessed;
+    unsigned last_access_frame;
+    uint8_t rom[256];               // slot 5 firmware
+} smartport;
 
 struct apple2 {
     a2_model model;
@@ -183,13 +190,13 @@ struct apple2 {
 
     disk2 disk;
 
-    int mb_count;                   // Mockingboards installed: 0, 1 (slot 4) or 2 (slots 4 and 5)
-    mockingboard mb[2];
+    int mb_count;                   // Mockingboards installed: 0 or 1 (slot 4)
+    mockingboard mb[1];
 
-    int midi_slot;                  // Passport MIDI card slot, 0 = none
-    passport_midi midi;
 
     harddisk hd;                    // slot 7, present while an image is mounted
+    smartport sp;                   // slot 5, FujiNet over SP-over-SLIP
+    mousecard mouse;                // slot 2
 
     a2_monitor monitor;
     bool scanlines;
@@ -208,6 +215,21 @@ void bus_write(apple2 *a2, uint16_t addr, uint8_t value);
 // harddisk.c
 uint8_t hd_rom_read(const apple2 *a2, uint16_t addr);
 uint8_t hd_io(apple2 *a2, uint8_t reg, bool write);
+
+// mouse.c
+uint8_t mouse_rom_read(const apple2 *a2, uint16_t addr);
+uint8_t mouse_io(apple2 *a2, uint8_t reg, bool write, uint8_t value);
+void mouse_vbl(apple2 *a2);
+bool mouse_irq(const apple2 *a2);
+void mouse_reset(apple2 *a2);
+
+// smartport.c
+void sp_init(smartport *sp);
+void sp_shutdown(smartport *sp);
+void sp_poll(apple2 *a2);
+void sp_reset(apple2 *a2);
+uint8_t sp_rom_read(const apple2 *a2, uint16_t addr);
+uint8_t sp_io(apple2 *a2, uint8_t reg, bool write);
 
 // memory.c
 void ramfactor_reset(apple2 *a2);
@@ -238,15 +260,6 @@ bool mb_irq(const mockingboard *mb);
 void mb_sync(mockingboard *mb, uint64_t cycle, blip *out, double start, double cps);
 uint8_t mb_read(mockingboard *mb, uint8_t offset);
 void mb_write(mockingboard *mb, uint8_t offset, uint8_t value);
-
-// midi.c
-void midi_power_on(passport_midi *m);
-void midi_reset(passport_midi *m);
-void midi_tick(passport_midi *m, int cycles);
-bool midi_irq(const passport_midi *m);
-void midi_flush(passport_midi *m, uint64_t cycle);
-uint8_t midi_read(passport_midi *m, uint8_t reg, uint64_t cycle);
-void midi_write(passport_midi *m, uint8_t reg, uint8_t value, uint64_t cycle);
 
 // video.c
 void video_render(apple2 *a2);

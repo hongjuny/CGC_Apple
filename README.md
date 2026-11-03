@@ -21,15 +21,16 @@ and a thin Swift/AppKit front end. **CGC** stands for **C**heon**g**gye**c**heon
   - NTSC artifact colour from a 4-dot phase window.
   - Colour, green, amber and white monitors, plus optional scanlines.
 - **Disk II** (slot 6): emulated at the bit level.
-  - Reads and writes `.dsk`/`.do`, `.po`, `.nib` and WOZ 1/2 images.
+  - Reads and writes `.dsk`/`.do`, `.po`, `.nib`, WOZ 1/2 and 140K 2IMG (`.2mg`) images. A 2IMG file keeps its header and chunks when saved.
   - Sector images are converted to GCR bit streams on insert and decoded back on save.
   - Optional "fast disk" mode runs the whole machine at full speed while a drive spins. Emulated timing is unchanged, so loaders and copy protection still work.
 - **Sound**:
   - Speaker.
-  - One or two Mockingboards (two 6522 VIAs and two AY-3-8913 PSGs each, in slots 4 and 5).
+  - Mockingboard in slot 4 (two 6522 VIAs and two AY-3-8913 PSGs).
   - Band-limited step synthesis keeps the square waves clean, and a jitter buffer with rate control prevents dropouts.
-- **Hard disk** (slot 7): a ProDOS block device with built-in firmware, so no ROM is needed. It mounts `.hdv`/`.po` images up to 32 MB and ProDOS-order `.2mg` images (see below).
-- **Passport MIDI** (slot 2): a 6840 PTM and a 6850 ACIA, played on macOS's built-in General MIDI synthesizer.
+- **Mouse** (slot 2): a card compatible with the AppleMouse II firmware interface (its own firmware, so no ROM is needed), with VBL, movement and button interrupts. The Mac pointer over the window is the Apple II mouse.
+- **FujiNet** (slot 5): a SmartPort card that relays to [FujiNet-PC](https://github.com/FujiNetWIFI/fujinet-firmware) over TCP ("SP over SLIP"), for FujiNet's network disks, network device, printer and clock (see below).
+- **Hard disk** (slot 7): a ProDOS block device with built-in firmware, so no ROM is needed. It mounts headerless ProDOS block images up to 32 MB (`.hdv`, `.2meg`, large `.po`) and ProDOS-order 2IMG images (`.2mg`, `.2img`) (see below).
 - **Joystick**: from the arrow keys, the mouse, or a game controller (GameController framework). The Option keys work as buttons 0 and 1 (Open/Closed Apple on the //e), and while a joystick mode is on the `` ` `` key (left of 1) is also button 1, so both buttons are under the left hand.
 - **Hangul**: runs CALL3327, the 1986 Korean Hangul I/O program. Its disk is inserted by default when it is present (see below).
 
@@ -130,9 +131,15 @@ The macOS input source does not matter (한글 입력기를 켜 두어도 됩니
 ### Hard disk (slot 7)
 
 Mount a ProDOS hard disk image from the Disk menu (⌥⌘O), or drop it on the
-window. `.hdv` and `.2mg` images always go to the hard disk, and so do `.po`
-images larger than a 140K floppy. The machine restarts when a hard disk is
-mounted or unmounted, and the mounted image is remembered across launches.
+window. Where an image goes is decided by its content, not its name:
+
+- A 2IMG file (`.2mg`, `.2img`) holding a 140K floppy goes into a floppy drive; a bigger one goes to the hard disk.
+- `.hdv` and `.2meg` files are hard disk images.
+- Any other headerless image larger than a 140K floppy (a multiple of 512 bytes, such as an 800K or 32 MB `.po`) is mounted as a hard disk.
+- `.dsk`, `.do`, `.nib` and `.woz` files always go into a floppy drive.
+
+The machine restarts when a hard disk is mounted or unmounted, and the mounted
+image is remembered across launches.
 
 Slot 7 is scanned first at power-on, so the machine boots from the hard disk
 even with a floppy in drive 1. To boot the floppy instead, type `PR#6` or
@@ -142,6 +149,31 @@ writes.
 This card is not a copy of any real hardware. It is an emulator-specific card
 like AppleWin's hard disk: its firmware passes each ProDOS block request to the
 emulator through one I/O register.
+
+### Mouse (slot 2)
+
+Turn on **Model → AppleMouse (Slot 2)**. Mouse programs find the card by its
+ID bytes and call the standard routines (SetMouse, ReadMouse, ServeMouse,
+ClampMouse, HomeMouse and so on), so it works in any slot-scanning program.
+The Mac pointer is mapped onto the area the program clamps the mouse to, so
+the Apple II cursor follows the pointer without capturing it. The left button
+is the mouse button. While the card is in, the Mac mouse no longer drives the
+joystick's mouse mode.
+
+### FujiNet (slot 5)
+
+[FujiNet](https://fujinet.online) on the Apple II is a SmartPort device. Here,
+the slot 5 SmartPort card relays each SmartPort call to FujiNet-PC, the desktop
+build of the FujiNet firmware, using its "SP over SLIP" protocol.
+
+1. Turn on **Model → FujiNet**. The card listens on `127.0.0.1:1985`, FujiNet's default port for this protocol.
+2. Build and start FujiNet-PC for the Apple II (`./build.sh -p APPLE` in [fujinet-firmware](https://github.com/FujiNetWIFI/fujinet-firmware), then `./run-fujinet`). It connects to the emulator, and the window subtitle shows "FujiNet: n devices".
+3. Boot it with `PR#5`. The Disk II in slot 6 is scanned before slot 5, so a floppy in drive 1 boots first. With a hard disk in slot 7, the hard disk boots first, and ProDOS still sees the FujiNet devices.
+
+The card has its own firmware with the standard ProDOS and SmartPort entry
+points, so no ROM is needed. The emulator waits for each reply, as a real
+SmartPort call waits for the bus (up to 30 seconds for long network
+transfers).
 
 ## Keys
 
@@ -170,7 +202,8 @@ The headless tests in `tests/` build against the C core with clang:
 - `memorytest.c`: RamWorks bank isolation, MMU and fixed video bank; RamFactor full-capacity access, pointer carry/wrap, slot ROM banking/arbitration, reset and slot conflicts. Uses synthetic firmware; no external ROMs required.
 - `disktest.c`: round trips between `.dsk`, `.po`, `.nib` and WOZ 2, plus malformed-image rejection and preservation of inserted disks.
 - `mbtest.c`: Mockingboard tone frequency, channel separation and VIA timer IRQ rate.
-- `miditest.c`: Passport MIDI ACIA byte stream and rate, and PTM IRQ rate.
+- `mousetest.c`: the mouse card from 6502 code on the II+ and enhanced IIe: ID bytes, InitMouse, ClampMouse, SetMouse, ReadMouse position and button, HomeMouse and 60 Hz VBL interrupts served by ServeMouse.
+- `sptest.c`: SmartPort against a fake FujiNet-PC on TCP: slot 5 boot, ProDOS and SmartPort calls (STATUS, READBLOCK, WRITEBLOCK, READ, WRITE, CONTROL), SLIP escaping, INIT numbering, stale replies and the reset CONTROL.
 - `hdtest.c`: boots a hard disk image from slot 7 on all three machines, and checks ProDOS STATUS, READ and WRITE, the error codes, 2IMG and write protection.
 
 ```sh
@@ -193,16 +226,15 @@ understood from MAME, its header comment names the MAME source file.
   - `apple2video.cpp`: text rendering rules and the NTSC artifact colour phase.
   - `src/devices/bus/a2bus/a2diskiing.cpp` and `machine/wozfdc.cpp`: Disk II.
   - `a2mockingboard.cpp`, `sound/ay8910.cpp` and `machine/6522via.cpp`: Mockingboard.
-  - `a2midi.cpp` and `machine/6840ptm.cpp`: Passport MIDI.
   - `a2eramworks3.cpp` and `a2memexp.cpp`: RamWorks III and RamFactor memory banking and register behaviour.
 - **[Klaus Dormann's 6502/65C02 functional tests](https://github.com/Klaus2m5/6502_65C02_functional_tests)** (GPL-3.0): used to verify the CPU core. They are not redistributed here.
 - **[WOZ disk image reference](https://applesaucefdc.com/woz/reference2/)** by John K. Morris (Applesauce): the WOZ 1/2 file format, including the "fake bit" behaviour on long runs of zero bits.
 - **Blip_Buffer** by Shay Green (blargg): the idea behind the band-limited step synthesis in `audio.c`.
 - **[AppleWin](https://github.com/AppleWin/AppleWin)**:
   - ROM file naming conventions, which this app accepts.
-  - Placing a second Mockingboard in slot 5.
   - Running at full speed while the disk is active.
+- **[FujiNet](https://github.com/FujiNetWIFI/fujinet-firmware)** (GPL-3.0): `lib/devrelay` and `lib/bus/iwm` were read as the reference for the "SP over SLIP" packet layout, the default port and SmartPort INIT numbering. No FujiNet code is included.
 - **[iolo/call3327](https://github.com/iolo/call3327)**: a restoration of CALL3327, the early Korean Hangul input/output program for the Apple II. It was published as source in the June 1986 issue of the Korean magazine *Micro Software*.
 
-Apple, Apple II, Mockingboard, Passport, Phasor and other names are trademarks
+Apple, Apple II, Mockingboard, Phasor and other names are trademarks
 of their respective owners.

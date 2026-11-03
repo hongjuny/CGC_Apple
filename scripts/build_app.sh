@@ -32,7 +32,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
         <dict>
             <key>CFBundleTypeName</key><string>Apple II Disk Image</string>
             <key>CFBundleTypeRole</key><string>Editor</string>
-            <key>CFBundleTypeExtensions</key><array><string>dsk</string><string>do</string><string>po</string><string>nib</string><string>woz</string><string>hdv</string><string>2mg</string></array>
+            <key>CFBundleTypeExtensions</key><array><string>dsk</string><string>do</string><string>po</string><string>nib</string><string>woz</string><string>hdv</string><string>2mg</string><string>2img</string><string>2meg</string></array>
         </dict>
     </array>
 </dict>

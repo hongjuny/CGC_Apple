@@ -26,7 +26,7 @@ bool a2_set_ramfactor(apple2 *a2, bool enabled)
     if (enabled == (a2->ramfactor_ram != NULL))
         return true;
     if (enabled) {
-        if (a2->midi_slot == 1 || !a2->ramfactor_rom_loaded)
+        if (!a2->ramfactor_rom_loaded)
             return false;
         uint8_t *ram = malloc(EXPANSION_RAM_SIZE);
         if (!ram)

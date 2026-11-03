@@ -6,12 +6,6 @@ import A2Core
 /// AVAudioSourceNode on the audio thread.
 final class AudioOutput: @unchecked Sendable {
     private let engine = AVAudioEngine()
-    /// macOS's built-in General MIDI synthesizer, played by the Passport MIDI card.
-    let midiSynth = AVAudioUnitMIDIInstrument(audioComponentDescription: AudioComponentDescription(
-        componentType: kAudioUnitType_MusicDevice,
-        componentSubType: kAudioUnitSubType_DLSSynth,
-        componentManufacturer: kAudioUnitManufacturer_Apple,
-        componentFlags: 0, componentFlagsMask: 0))
     private let lock = NSLock()
     private var ring = [Float](repeating: 0, count: 16384 * 2)   // interleaved L/R
     private var readIndex = 0        // in frames
@@ -45,8 +39,6 @@ final class AudioOutput: @unchecked Sendable {
         }
         engine.attach(source)
         engine.connect(source, to: engine.mainMixerNode, format: format)
-        engine.attach(midiSynth)
-        engine.connect(midiSynth, to: engine.mainMixerNode, format: nil)
         try? engine.start()
     }
 

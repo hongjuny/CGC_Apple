@@ -70,17 +70,10 @@ size_t a2_take_audio(apple2 *a2, int16_t *out, size_t max_frames);
 // 0.98..1.02), so the front end can keep its output buffer level steady.
 void a2_set_audio_rate_adjust(apple2 *a2, double ratio);
 
-// Mockingboards (two AY-3-8913 PSGs each): 0, 1 (slot 4, the default) or
-// 2 (slots 4 and 5). Each card's first PSG plays left, its second right.
+// Mockingboard (two AY-3-8913 PSGs) in slot 4: 0 or 1 (the default).
+// Its first PSG plays left, its second right.
 void a2_set_mockingboards(apple2 *a2, int count);
 int a2_mockingboards(const apple2 *a2);
-
-// Passport MIDI Interface in `slot` (1-7, conventionally 2); 0 removes it.
-// Slots used by other cards (4/5 with Mockingboards, 6 for the Disk II) are
-// refused (also slot 1 when RamFactor is installed). Returns the slot actually set.
-int a2_set_midi_slot(apple2 *a2, int slot);
-// Moves up to max MIDI bytes the card has transmitted into out.
-size_t a2_take_midi(apple2 *a2, uint8_t *out, size_t max);
 
 // AE memory cards, both modelled with 8 MB as in MAME. Disabled by default.
 // RamWorks III replaces the IIe auxiliary card (64 KB banks; video uses bank 0).
@@ -90,7 +83,7 @@ bool a2_ramworks(const apple2 *a2);
 // RamFactor occupies slot 1; its firmware must be loaded before enabling it.
 // Accepts one 8 KB ROM revision, not MAME's concatenated 32 KB region.
 bool a2_load_ramfactor_rom(apple2 *a2, const uint8_t *data, size_t len);
-// Enabling fails if slot 1 contains MIDI, firmware is missing or allocation fails.
+// Enabling fails if the firmware is missing or allocation fails.
 // Removing a card or power cycling discards its RAM; RESET preserves RAM.
 bool a2_set_ramfactor(apple2 *a2, bool enabled);
 bool a2_ramfactor(const apple2 *a2);
@@ -115,7 +108,7 @@ void a2_disk_mark_clean(apple2 *a2, int drive);
 // Hard disk in slot 7: a ProDOS block device with built-in firmware, so no ROM
 // is needed. Accepts raw ProDOS-order images (.hdv, .po) up to 32 MB and
 // ProDOS-order 2IMG (.2mg). While mounted, slot 7 boots before the Disk II.
-// Insert fails on a bad image or when the MIDI card uses slot 7.
+// Insert fails on a bad image.
 bool a2_hd_insert(apple2 *a2, const uint8_t *data, size_t len, bool write_protected);
 void a2_hd_eject(apple2 *a2);
 bool a2_hd_present(const apple2 *a2);
@@ -125,6 +118,22 @@ bool a2_hd_active(const apple2 *a2);    // accessed in the last few frames
 // The whole image file, with any 2IMG header, as it should be saved.
 size_t a2_hd_export_size(const apple2 *a2);
 size_t a2_hd_export(apple2 *a2, uint8_t *out, size_t max);
+
+// Mouse card in slot 2 (AppleMouse II firmware interface, own firmware, no ROM
+// needed). The host pointer is given as a position over the Apple II screen,
+// 0..1 from the top left, and mapped over the window the program clamps to.
+bool a2_set_mouse(apple2 *a2, bool enabled);
+bool a2_mouse_enabled(const apple2 *a2);
+void a2_mouse_move(apple2 *a2, float x, float y);
+void a2_mouse_button(apple2 *a2, bool down);
+
+// SmartPort in slot 5, relayed to FujiNet-PC over TCP ("SP over SLIP"). The
+// card listens on 127.0.0.1:port (FujiNet's default is 1985) and FujiNet-PC
+// connects to it. Returns false if the port cannot be opened.
+bool a2_set_smartport(apple2 *a2, bool enabled, int port);
+int a2_smartport_state(const apple2 *a2);   // 0 off, 1 waiting for FujiNet, 2 connected
+int a2_smartport_units(const apple2 *a2);   // devices FujiNet offers
+bool a2_smartport_active(const apple2 *a2); // used in the last few frames
 // Writes the (possibly modified) image back in its original format into out.
 // a2_disk_export_size gives the buffer size needed. Returns the number of
 // bytes written, or 0 on failure.

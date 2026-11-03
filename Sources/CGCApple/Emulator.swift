@@ -13,6 +13,9 @@ final class Emulator {
     var model: a2_model { a2_get_model(a2) }
     private(set) var romDir: URL?
     private(set) var diskURLs: [URL?] = [nil, nil]
+    /// For a floppy that came from a 2IMG file, the bytes before and after the
+    /// disk data (header, comment, creator chunks), written back on save.
+    private var diskWrappers: [(header: Data, trailer: Data)?] = [nil, nil]
     /// Image mounted on the slot 7 hard disk.
     private(set) var hardDiskURL: URL?
     /// Pseudo drive number for the hard disk in save and discard calls.
@@ -26,24 +29,53 @@ final class Emulator {
     private var audioScratch = [Int16](repeating: 0, count: 4096 * 2)   // stereo frames
     private var smoothedFill = Double(AudioOutput.targetFill)
 
-    /// Mockingboards installed: 0, 1 (slot 4) or 2 (slots 4 and 5).
+    /// Mockingboard in slot 4: 0 or 1.
     var mockingboards = 1 {
-        didSet {
-            a2_set_mockingboards(a2, Int32(mockingboards))
-            if midiSlot >= 4 && midiSlot - 4 < mockingboards { setMIDISlot(0) }
+        didSet { a2_set_mockingboards(a2, Int32(mockingboards)) }
+    }
+
+    // MARK: FujiNet (SmartPort in slot 5)
+
+    /// FujiNet-PC's default "SP over SLIP" port.
+    nonisolated static let fujiNetPort = 1985
+    private(set) var fujiNetEnabled = false
+
+    /// Opens or closes the slot 5 SmartPort that FujiNet-PC connects to.
+    func setFujiNet(_ enabled: Bool) throws {
+        guard a2_set_smartport(a2, enabled, Int32(Self.fujiNetPort)) else {
+            fujiNetEnabled = false
+            throw NSError(domain: "CGCApple", code: 7, userInfo: [
+                NSLocalizedDescriptionKey: "Could not listen on port \(Self.fujiNetPort) for FujiNet. " +
+                    "Another program (or another copy of this emulator) may be using it.",
+            ])
+        }
+        fujiNetEnabled = enabled
+    }
+
+    /// nil when off; otherwise the number of FujiNet devices, or 0 while waiting for FujiNet-PC.
+    var fujiNetDevices: Int? {
+        switch a2_smartport_state(a2) {
+        case 0: return nil
+        case 1: return 0
+        default: return Int(a2_smartport_units(a2))
         }
     }
 
-    private lazy var midi = MIDIPlayer(synth: audio.midiSynth)
-    private var midiScratch = [UInt8](repeating: 0, count: 4096)
-    /// Slot of the Passport MIDI card, 0 = none.
-    private(set) var midiSlot = 0
+    var fujiNetActive: Bool { a2_smartport_active(a2) }
 
-    @discardableResult
-    func setMIDISlot(_ slot: Int) -> Int {
-        midiSlot = Int(a2_set_midi_slot(a2, Int32(slot)))
-        midi.panic()
-        return midiSlot
+    // MARK: Mouse card (slot 2)
+
+    var mouseCard = false {
+        didSet { a2_set_mouse(a2, mouseCard) }
+    }
+
+    /// Pointer position over the Apple II screen, 0...1 from the top left.
+    func mouseCardMoved(x: Double, y: Double) {
+        a2_mouse_move(a2, Float(x), Float(y))
+    }
+
+    func mouseCardButton(down: Bool) {
+        a2_mouse_button(a2, down)
     }
 
     /// IIe Caps Lock: letters are sent upper-case. CALL3327 and most period
@@ -98,7 +130,9 @@ final class Emulator {
         a2_set_monitor(a2, monitor)
         a2_set_scanlines(a2, scanlines)
         a2_set_mockingboards(a2, Int32(mockingboards))
-        a2_set_midi_slot(a2, Int32(midiSlot))
+        // The listening port moves to the new machine once the old one has closed it.
+        if fujiNetEnabled { try? setFujiNet(true) }
+        a2_set_mouse(a2, mouseCard)
         powerCycle()
     }
 
@@ -213,12 +247,10 @@ final class Emulator {
     func powerCycle() {
         pasteQueue.removeAll()
         a2_power_cycle(a2)
-        midi.panic()
     }
 
     func reset() {
         a2_reset(a2)
-        midi.panic()
     }
 
     func runFrame() { runFrame(warp: false) }
@@ -232,13 +264,6 @@ final class Emulator {
             a2_take_audio(a2, $0.baseAddress, $0.count / 2)
         }
         if !warp { audio.push(audioScratch, frames: n) }
-
-        if midiSlot > 0 {
-            let m = midiScratch.withUnsafeMutableBufferPointer {
-                a2_take_midi(a2, $0.baseAddress, $0.count)
-            }
-            if m > 0 { midi.feed(midiScratch[0..<m]) }
-        }
 
         guard !warp else { return }
 
@@ -307,15 +332,23 @@ final class Emulator {
 
     func insertDisk(_ url: URL, drive: Int) throws {
         try saveDisk(drive: drive)
-        let data = try Data(contentsOf: url)
-        let format: a2_disk_format
+        var data = try Data(contentsOf: url)
+        var format: a2_disk_format
         switch url.pathExtension.lowercased() {
         case "po": format = A2_DISK_PRODOS_ORDER
         case "nib": format = A2_DISK_NIBBLE
         case "woz": format = A2_DISK_WOZ
         default: format = A2_DISK_DOS_ORDER
         }
-        let writable = FileManager.default.isWritableFile(atPath: url.path)
+        var writable = FileManager.default.isWritableFile(atPath: url.path)
+        var wrapper: (header: Data, trailer: Data)?
+        if let img = TwoIMG(header: data, fileSize: data.count) {
+            // A floppy inside a 2IMG wrapper: insert the disk data, keep the rest for saving.
+            format = img.format == 2 ? A2_DISK_NIBBLE : img.format == 1 ? A2_DISK_PRODOS_ORDER : A2_DISK_DOS_ORDER
+            wrapper = (Data(data.prefix(img.offset)), Data(data.suffix(from: img.offset + img.length)))
+            data = data.subdata(in: img.offset..<img.offset + img.length)
+            writable = writable && !img.locked
+        }
         let ok = data.withUnsafeBytes {
             a2_disk_insert(a2, Int32(drive), $0.baseAddress, $0.count, format, !writable)
         }
@@ -328,25 +361,59 @@ final class Emulator {
             ])
         }
         diskURLs[drive] = url
+        diskWrappers[drive] = wrapper
     }
 
     func ejectDisk(drive: Int) throws {
         try saveDisk(drive: drive)
         a2_disk_eject(a2, Int32(drive))
         diskURLs[drive] = nil
+        diskWrappers[drive] = nil
     }
 
     // MARK: Hard disk (slot 7)
 
     /// True for images that belong on the hard disk rather than a floppy drive:
     /// .hdv and .2mg, and .po files larger than a 140K floppy.
-    static func isHardDiskImage(_ url: URL) -> Bool {
+    /// File name extensions the app opens: floppy and hard disk images alike.
+    nonisolated static let imageExtensions = ["dsk", "do", "po", "nib", "woz", "hdv", "2mg", "2img", "2meg"]
+
+    /// A 2IMG image's header fields: format (0 DOS order, 1 ProDOS order,
+    /// 2 nibbles), where the data is and how long, and the locked flag.
+    struct TwoIMG {
+        let format: UInt32, offset: Int, length: Int, locked: Bool
+
+        /// `header` is at least the first 64 bytes of a file `fileSize` bytes long.
+        init?(header: Data, fileSize: Int) {
+            guard header.count >= 64, header.prefix(4) == Data("2IMG".utf8) else { return nil }
+            let h = Data(header.prefix(64))
+            func u32(_ at: Int) -> UInt32 {
+                UInt32(h[at]) | UInt32(h[at + 1]) << 8 | UInt32(h[at + 2]) << 16 | UInt32(h[at + 3]) << 24
+            }
+            format = u32(0x0C)
+            offset = Int(u32(0x18))
+            length = Int(u32(0x1C))
+            locked = u32(0x10) & 0x8000_0000 != 0
+            guard offset >= 64, offset <= fileSize, length <= fileSize - offset else { return nil }
+        }
+    }
+
+    /// True for images that belong on the hard disk rather than a floppy drive,
+    /// judged by content: a 2IMG image bigger than a 140K floppy, or a headerless
+    /// ProDOS block image (.hdv, .2meg, a large .po...) bigger than a floppy.
+    nonisolated static func isHardDiskImage(_ url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        let head = (try? handle.read(upToCount: 64)) ?? Data()
+        let size = Int((try? handle.seekToEnd()) ?? 0)
+        if let img = TwoIMG(header: head, fileSize: size) {
+            return img.format == 1 && img.length > Int(A2_DSK_SIZE)
+        }
+        if head.prefix(4) == Data("2IMG".utf8) { return false }
         switch url.pathExtension.lowercased() {
-        case "hdv", "2mg": return true
-        case "po":
-            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-            return size != Int(A2_DSK_SIZE)
-        default: return false
+        case "dsk", "do", "nib", "woz": return false
+        case "hdv", "2meg": return size > 0 && size % 512 == 0      // hard disk names, any size
+        default: return size > Int(A2_DSK_SIZE) && size % 512 == 0
         }
     }
 
@@ -400,7 +467,8 @@ final class Emulator {
                 NSLocalizedDescriptionKey: "Could not export \(url.lastPathComponent). The disk remains inserted.",
             ])
         }
-        try Data(buf[0..<n]).write(to: url, options: .atomic)
+        let wrapper = diskWrappers[drive]
+        try ((wrapper?.header ?? Data()) + Data(buf[0..<n]) + (wrapper?.trailer ?? Data())).write(to: url, options: .atomic)
         a2_disk_mark_clean(a2, Int32(drive))
     }
 

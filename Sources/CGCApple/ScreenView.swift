@@ -44,16 +44,30 @@ final class ScreenView: NSView {
         return ((p.x - x0) / w, (p.y - y0) / h)
     }
 
+    // With the mouse card in, the pointer and the button belong to it;
+    // otherwise they drive the joystick in its mouse mode.
     override func mouseMoved(with event: NSEvent) {
         let (x, y) = screenPosition(event)
-        joystick?.mouseMoved(x: x, y: y)
+        if emulator.mouseCard {
+            emulator.mouseCardMoved(x: Double(x), y: Double(y))
+        } else {
+            joystick?.mouseMoved(x: x, y: y)
+        }
     }
     override func mouseDragged(with event: NSEvent) { mouseMoved(with: event) }
     override func rightMouseDragged(with event: NSEvent) { mouseMoved(with: event) }
-    override func mouseDown(with event: NSEvent) { joystick?.mouseButton(0, down: true) }
-    override func mouseUp(with event: NSEvent) { joystick?.mouseButton(0, down: false) }
-    override func rightMouseDown(with event: NSEvent) { joystick?.mouseButton(1, down: true) }
-    override func rightMouseUp(with event: NSEvent) { joystick?.mouseButton(1, down: false) }
+    override func mouseDown(with event: NSEvent) { press(0, down: true) }
+    override func mouseUp(with event: NSEvent) { press(0, down: false) }
+    override func rightMouseDown(with event: NSEvent) { press(1, down: true) }
+    override func rightMouseUp(with event: NSEvent) { press(1, down: false) }
+
+    private func press(_ button: Int, down: Bool) {
+        if emulator.mouseCard {
+            if button == 0 { emulator.mouseCardButton(down: down) }   // the AppleMouse has one button
+        } else {
+            joystick?.mouseButton(button, down: down)
+        }
+    }
 
     func refresh() {
         let w = Int(A2_SCREEN_W), h = Int(A2_SCREEN_H)
@@ -145,7 +159,7 @@ final class ScreenView: NSView {
 
     // MARK: Drag and drop (drop on the right half for drive 2)
 
-    private static let diskExtensions: Set<String> = ["dsk", "do", "po", "nib", "woz"]
+    private static let diskExtensions = Set(Emulator.imageExtensions)
 
     private func droppedDisk(_ sender: NSDraggingInfo) -> URL? {
         let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self]) as? [URL]

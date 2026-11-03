@@ -260,17 +260,14 @@ static uint8_t io_access(apple2 *a2, uint16_t addr, bool write, uint8_t value)
     case 0xE: // slot 6: Disk II
         return disk2_io(&a2->disk, reg & 0x0F, write, value, a2->cpu.cycles);
     default:
+        if ((reg >> 4) == 0xA && a2->mouse.enabled)   // $C0A0: slot 2 mouse
+            return mouse_io(a2, reg & 0x0F, write, value);
+        if ((reg >> 4) == 0xD && a2->sp.enabled)  // $C0D0: slot 5 SmartPort
+            return sp_io(a2, reg & 0x0F, write);
         if ((reg >> 4) == 0xF && a2->hd.file)     // $C0F0: slot 7 hard disk
             return hd_io(a2, reg & 0x0F, write);
         if ((reg >> 4) == 0x9 && a2->ramfactor_ram)
             return ramfactor_io(a2, reg & 0x0F, write, value);
-        if ((reg >> 4) - 8 == a2->midi_slot && a2->midi_slot > 0) {   // $C0n0: Passport MIDI
-            if (write) {
-                midi_write(&a2->midi, reg & 0x0F, value, a2->cpu.cycles);
-                return 0;
-            }
-            return midi_read(&a2->midi, reg & 0x0F, a2->cpu.cycles);
-        }
         break;
     }
     return write ? 0 : floating_bus(a2);
@@ -308,8 +305,12 @@ static uint8_t slot_rom_read(apple2 *a2, uint16_t addr)
         if (page >= 0xC8 && card_c800)
             return ramfactor_rom_read(a2, addr);
     }
-    if (page >= 0xC4 && page - 0xC4 < a2->mb_count)
-        return mb_read(&a2->mb[page - 0xC4], addr & 0xFF);
+    if (page == 0xC4 && a2->mb_count)
+        return mb_read(&a2->mb[0], addr & 0xFF);
+    if (page == 0xC2 && a2->mouse.enabled)
+        return mouse_rom_read(a2, addr);
+    if (page == 0xC5 && a2->sp.enabled)
+        return sp_rom_read(a2, addr);
     if (page == 0xC7 && a2->hd.file)
         return hd_rom_read(a2, addr);
     if (page == 0xC6 && a2->disk.rom_loaded)
@@ -336,10 +337,10 @@ static void mem_write(void *ctx, uint16_t addr, uint8_t value)
         page[addr & 0xFF] = value;
     } else if (addr < 0xC100) {
         io_access(a2, addr, true, value);
-    } else if ((addr >> 8) >= 0xC4 && (addr >> 8) - 0xC4 < a2->mb_count &&
+    } else if ((addr >> 8) == 0xC4 && a2->mb_count &&
                !(a2_is_iie(a2) && a2->intcxrom)) {
         mb_catch_up(a2);
-        mb_write(&a2->mb[(addr >> 8) - 0xC4], addr & 0xFF, value);
+        mb_write(&a2->mb[0], addr & 0xFF, value);
     } else if ((addr >> 8) == 0xC1 && a2->ramfactor_ram) {
         // INTCXROM gates reads; writes still reach the peripheral slot.
         a2->ramfactor_c800 = true;
@@ -385,6 +386,8 @@ bool a2_ramworks(const apple2 *a2)
 apple2 *a2_create(a2_model model)
 {
     apple2 *a2 = calloc(1, sizeof *a2);
+    if (a2)
+        sp_init(&a2->sp);
     if (!a2)
         return NULL;
     a2->model = model;
@@ -396,8 +399,6 @@ apple2 *a2_create(a2_model model)
     a2->cpu.cmos = model == A2_MODEL_IIE_ENHANCED;
     a2->mb_count = 1;
     mb_reset(&a2->mb[0]);
-    mb_reset(&a2->mb[1]);
-    midi_power_on(&a2->midi);
     blip_clear(&a2->blip_out[0]);
     blip_clear(&a2->blip_out[1]);
     a2->audio_start = -BLIP_TAPS * a2->audio_cycles_per_sample;
@@ -418,10 +419,8 @@ void a2_set_audio_rate_adjust(apple2 *a2, double ratio)
 void a2_set_mockingboards(apple2 *a2, int count)
 {
     mb_catch_up(a2);
-    a2->mb_count = count < 0 ? 0 : count > 2 ? 2 : count;
-    if (a2->midi_slot >= 4 && a2->midi_slot - 4 < a2->mb_count)
-        a2->midi_slot = 0;      // a Mockingboard now occupies the MIDI card's slot
-    for (int i = 0; i < 2; i++) {
+    a2->mb_count = count < 0 ? 0 : count > 1 ? 1 : count;
+    for (int i = 0; i < 1; i++) {
         mb_reset(&a2->mb[i]);
         a2->mb[i].ay_cycle = a2->cpu.cycles;
     }
@@ -433,28 +432,6 @@ int a2_mockingboards(const apple2 *a2)
     return a2->mb_count;
 }
 
-int a2_set_midi_slot(apple2 *a2, int slot)
-{
-    bool taken = slot == 6 || (slot == 7 && a2->hd.file) || (slot == 1 && a2->ramfactor_ram) || (slot >= 4 && slot - 4 < a2->mb_count);
-    if (slot < 0 || slot > 7 || taken)
-        slot = 0;
-    if (slot != a2->midi_slot)
-        midi_power_on(&a2->midi);
-    a2->midi_slot = slot;
-    a2->cpu.irq_line = false;
-    return slot;
-}
-
-size_t a2_take_midi(apple2 *a2, uint8_t *out, size_t max)
-{
-    passport_midi *m = &a2->midi;
-    size_t n = m->out_count < max ? m->out_count : max;
-    memcpy(out, m->out, n);
-    memmove(m->out, m->out + n, m->out_count - n);
-    m->out_count -= n;
-    return n;
-}
-
 void a2_destroy(apple2 *a2)
 {
     if (!a2)
@@ -464,6 +441,7 @@ void a2_destroy(apple2 *a2)
     free(a2->ramworks_extra);
     free(a2->ramfactor_ram);
     a2_hd_eject(a2);
+    sp_shutdown(&a2->sp);
     free(a2);
 }
 
@@ -547,12 +525,12 @@ void a2_power_cycle(apple2 *a2)
     a2->cpu.cmos = cmos;
     reset_switches(a2);
     cpu_reset(&a2->cpu);
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 1; i++) {
         mb_reset(&a2->mb[i]);
         a2->mb[i].ay_cycle = a2->cpu.cycles;
         a2->mb[i].level[0] = a2->mb[i].level[1] = 0;
     }
-    midi_power_on(&a2->midi);
+    mouse_reset(a2);
     // The CPU cycle counter restarts, so the audio timeline does too.
     a2->audio_start = (double)a2->cpu.cycles - BLIP_TAPS * a2->audio_cycles_per_sample;
     for (int c = 0; c < 2; c++) {
@@ -567,9 +545,10 @@ void a2_reset(apple2 *a2)
     disk2_reset(&a2->disk);
     reset_switches(a2);
     mb_catch_up(a2);
-    for (int i = 0; i < 2; i++)
+    for (int i = 0; i < 1; i++)
         mb_reset(&a2->mb[i]);   // the cards' VIAs share the bus RESET line
-    midi_reset(&a2->midi);
+    sp_reset(a2);
+    mouse_reset(a2);
     a2->cpu.irq_line = false;
     cpu_reset(&a2->cpu);
 }
@@ -587,18 +566,16 @@ void a2_render(apple2 *a2)
 void a2_run_frame_ex(apple2 *a2, bool render)
 {
     uint64_t end = a2->cpu.cycles + A2_CYCLES_PER_FRAME;
-    if (a2->mb_count > 0 || a2->midi_slot > 0) {
-        // Cards with timers: step them with the CPU and OR their interrupt lines.
+    mouse_vbl(a2);                  // the frame starts at vertical blank
+    if (a2->mb_count > 0 || a2->mouse.enabled) {
+        // Cards that interrupt: the Mockingboard's VIA timers run with the CPU,
+        // and the mouse card raises its line at vertical blank.
         while (a2->cpu.cycles < end) {
             int cycles = cpu_step(&a2->cpu);
-            bool irq = false;
-            for (int i = 0; i < a2->mb_count; i++) {
-                mb_tick(&a2->mb[i], cycles);
-                irq |= mb_irq(&a2->mb[i]);
-            }
-            if (a2->midi_slot > 0) {
-                midi_tick(&a2->midi, cycles);
-                irq |= midi_irq(&a2->midi);
+            bool irq = mouse_irq(a2);
+            if (a2->mb_count > 0) {
+                mb_tick(&a2->mb[0], cycles);
+                irq |= mb_irq(&a2->mb[0]);
             }
             a2->cpu.irq_line = irq;
         }
@@ -606,8 +583,7 @@ void a2_run_frame_ex(apple2 *a2, bool render)
         while (a2->cpu.cycles < end)
             cpu_step(&a2->cpu);
     }
-    if (a2->midi_slot > 0)
-        midi_flush(&a2->midi, a2->cpu.cycles);
+    sp_poll(a2);
     audio_flush(a2);
     a2->frame_count++;
     if (render)

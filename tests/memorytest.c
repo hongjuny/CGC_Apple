@@ -116,16 +116,11 @@ static void ramfactor(a2_model model)
     for (size_t i = 0; i < sizeof rom; i++) rom[i] = (uint8_t)(i / 256);
     assert(!a2_load_ramfactor_rom(a, rom, sizeof rom - 1));
     assert(a2_load_ramfactor_rom(a, rom, sizeof rom));
-    assert(a2_set_midi_slot(a, 1) == 1);
-    assert(!a2_set_ramfactor(a, true));
-    assert(a2_set_midi_slot(a, 2) == 2);
     assert(a2_set_ramfactor(a, true));
     if (model != A2_MODEL_IIPLUS) {
         assert(a2_set_ramworks(a, true));
         write8(a, 0xC073, 7); // Both cards installed together.
     }
-    assert(a2_set_midi_slot(a, 1) == 0);
-    assert(a2_set_midi_slot(a, 2) == 2);
 
     // Distinct data in every 64 KB bank across the full 8 MB.
     for (int bank = 0; bank < 128; bank++) {
@@ -189,7 +184,6 @@ static void ramfactor(a2_model model)
     address(a, 0x1234); assert(read8(a, 0xC093) == 0xFF);
     assert(a2_set_ramfactor(a, false));
     assert(!a2_ramfactor(a) && !a->ramfactor_c800);
-    assert(a2_set_midi_slot(a, 1) == 1);
     a2_destroy(a);
 }
 
