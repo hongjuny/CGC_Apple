@@ -14,13 +14,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var lastStatus = ""
     private var paused = false
     private var activity: NSObjectProtocol?
-    private var loadedROMDir: URL?
 
     private static let romDirKey = "romDirectory"
     private static let modelKey = "model"
     private static let mockingboardCountKey = "mockingboardCount"
     private static let midiSlotKey = "midiSlot"
     private static let realDiskSpeedKey = "realDiskSpeed"
+    private static let scanlinesKey = "scanlines"
     private static let joystickKey = "joystickMode"
     private static let passportSlot = 2
     private static let ramWorksKey = "ramWorksEnabled"
@@ -119,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if let res = Bundle.main.resourceURL {
             dirs.append(res.appendingPathComponent("disks"))
         }
-        if let romDir = loadedROMDir {
+        if let romDir = emulator.romDir {
             dirs.append(romDir.deletingLastPathComponent().appendingPathComponent("disks"))
         }
         dirs.append(URL(fileURLWithPath: fm.currentDirectoryPath).appendingPathComponent("disks"))
@@ -151,8 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private func loadROMs() -> Bool {
         for dir in romCandidates() where (try? emulator.loadROMs(from: dir)) != nil {
-            loadedROMDir = dir
-            warnIfNoDiskROM(dir)
+            warnIfNoDiskROM()
             return true
         }
         // Ask for the folder until valid ROMs are picked or the user cancels.
@@ -164,9 +163,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             guard panel.runModal() == .OK, let dir = panel.url else { return false }
             do {
                 try emulator.loadROMs(from: dir)
-                loadedROMDir = dir
                 UserDefaults.standard.set(dir.path, forKey: Self.romDirKey)
-                warnIfNoDiskROM(dir)
+                warnIfNoDiskROM()
                 return true
             } catch {
                 NSAlert(error: error).runModal()
@@ -174,8 +172,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
 
-    private func warnIfNoDiskROM(_ dir: URL) {
-        guard !emulator.hasDiskROM else { return }
+    private func warnIfNoDiskROM() {
+        guard !emulator.hasDiskROM, let dir = emulator.romDir else { return }
         let alert = NSAlert()
         alert.messageText = "Disk II ROM not found"
         alert.informativeText = "DISK2.rom (341-0027, 256 bytes) is missing from \(dir.path), so disks cannot boot. BASIC still works."
@@ -204,7 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         joystick.poll()
         if emulator.shouldWarp {
             // Spend most of this timer period emulating, then resync the frame clock.
-            _ = emulator.runWarp(until: CACurrentMediaTime() + 0.007)
+            emulator.runWarp(until: CACurrentMediaTime() + 0.007)
             startTime = CACurrentMediaTime()
             framesRun = 0
             screen.refresh()
@@ -297,13 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         UserDefaults.standard.set(sender.tag, forKey: Self.modelKey)
         sender.menu?.items.forEach { if $0.action == #selector(selectModel(_:)) { $0.state = $0 == sender ? .on : .off } }
         window.title = "CGC " + Emulator.name(of: model)
-        warnIfNoDiskROMForCurrentModel()
-    }
-
-    private func warnIfNoDiskROMForCurrentModel() {
-        if let dir = UserDefaults.standard.string(forKey: Self.romDirKey) {
-            warnIfNoDiskROM(URL(fileURLWithPath: dir))
-        }
+        warnIfNoDiskROM()
     }
 
     @objc private func toggleCapsLock(_ sender: NSMenuItem) {
@@ -325,22 +317,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
 
-    @objc private func toggleRamWorks(_ sender: NSMenuItem) {
+    @objc private func toggleMemoryCard(_ sender: NSMenuItem) {
         do {
             try emulator.saveAllDisks()
-            try emulator.setRamWorks(!emulator.ramWorksEnabled)
-            UserDefaults.standard.set(emulator.ramWorksEnabled, forKey: Self.ramWorksKey)
-            emulator.powerCycle()
-        } catch {
-            NSAlert(error: error).runModal()
-        }
-    }
-
-    @objc private func toggleRamFactor(_ sender: NSMenuItem) {
-        do {
-            try emulator.saveAllDisks()
-            try emulator.setRamFactor(!emulator.ramFactorEnabled)
-            UserDefaults.standard.set(emulator.ramFactorEnabled, forKey: Self.ramFactorKey)
+            if sender.tag == 0 {
+                try emulator.setRamWorks(!emulator.ramWorksEnabled)
+                UserDefaults.standard.set(emulator.ramWorksEnabled, forKey: Self.ramWorksKey)
+            } else {
+                try emulator.setRamFactor(!emulator.ramFactorEnabled)
+                UserDefaults.standard.set(emulator.ramFactorEnabled, forKey: Self.ramFactorKey)
+            }
             emulator.powerCycle()
         } catch {
             NSAlert(error: error).runModal()
@@ -348,12 +334,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        if menuItem.action == #selector(toggleRamWorks(_:)) {
-            menuItem.state = emulator.ramWorksActive ? .on : .off
-            return emulator.model != A2_MODEL_IIPLUS
-        }
-        if menuItem.action == #selector(toggleRamFactor(_:)) {
-            menuItem.state = emulator.ramFactorEnabled ? .on : .off
+        if menuItem.action == #selector(toggleMemoryCard(_:)) {
+            let isRamWorks = menuItem.tag == 0
+            menuItem.state = (isRamWorks ? emulator.ramWorksActive : emulator.ramFactorEnabled) ? .on : .off
+            return !isRamWorks || emulator.model != A2_MODEL_IIPLUS
         }
         return true
     }
@@ -372,6 +356,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     @objc private func toggleScanlines(_ sender: NSMenuItem) {
         emulator.scanlines.toggle()
+        UserDefaults.standard.set(emulator.scanlines, forKey: Self.scanlinesKey)
         sender.state = emulator.scanlines ? .on : .off
     }
 
@@ -453,9 +438,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         passport.state = emulator.midiSlot != 0 ? .on : .off
         submenu("Model", models + [.separator(), caps, .separator()] + boards + [.separator(), passport])
         submenu("Memory", [
-            item("RamWorks III (8 MB, IIe AUX; Restarts Machine)", #selector(toggleRamWorks(_:))),
-            item("RamFactor (8 MB, Slot 1; Restarts Machine)", #selector(toggleRamFactor(_:))),
+            item("RamWorks III (8 MB, IIe AUX; Restarts Machine)", #selector(toggleMemoryCard(_:)), tag: 0),
+            item("RamFactor (8 MB, Slot 1; Restarts Machine)", #selector(toggleMemoryCard(_:)), tag: 1),
         ])
+        emulator.scanlines = UserDefaults.standard.bool(forKey: Self.scanlinesKey)
+        let scanlines = item("Scanlines", #selector(toggleScanlines(_:)), "l")
+        scanlines.state = emulator.scanlines ? .on : .off
         submenu("Machine", [
             item("Reset (Ctrl-RESET)", #selector(reset), "r"),
             item("Power Cycle", #selector(powerCycle), "r", [.command, .shift]),
@@ -466,7 +454,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             item("Green Monitor", #selector(setMonitor(_:)), "2", tag: Int(A2_MONITOR_GREEN.rawValue)),
             item("Amber Monitor", #selector(setMonitor(_:)), "3", tag: Int(A2_MONITOR_AMBER.rawValue)),
             item("White Monitor", #selector(setMonitor(_:)), "4", tag: Int(A2_MONITOR_WHITE.rawValue)),
-            item("Scanlines", #selector(toggleScanlines(_:)), "l"),
+            scanlines,
             .separator(),
             item("Mute", #selector(toggleMute(_:)), "m", [.command, .shift]),
         ])

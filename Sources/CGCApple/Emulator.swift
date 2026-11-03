@@ -10,13 +10,13 @@ final class Emulator {
 
     private var a2: OpaquePointer
     let audio = AudioOutput()
-    private(set) var model: a2_model
-    private var romDir: URL?
+    var model: a2_model { a2_get_model(a2) }
+    private(set) var romDir: URL?
     private(set) var diskURLs: [URL?] = [nil, nil]
     private(set) var hasDiskROM = false
     private(set) var hasRamFactorROM = false
     private(set) var ramWorksEnabled = false
-    private(set) var ramFactorEnabled = false
+    var ramFactorEnabled: Bool { a2_ramfactor(a2) }
     var ramWorksActive: Bool { a2_ramworks(a2) }
     private var pasteQueue: [UInt8] = []
     private var audioScratch = [Int16](repeating: 0, count: 4096 * 2)   // stereo frames
@@ -54,7 +54,6 @@ final class Emulator {
     }
 
     init(model: a2_model) {
-        self.model = model
         a2 = a2_create(model)
     }
 
@@ -72,21 +71,20 @@ final class Emulator {
     func switchModel(to newModel: a2_model) throws {
         guard newModel != model, let dir = romDir else { return }
         try saveAllDisks()
-        let old = a2, oldModel = model, oldHasDiskROM = hasDiskROM
+        let old = a2, oldHasDiskROM = hasDiskROM
+        let ramFactorWasEnabled = ramFactorEnabled
         let oldHasRamFactorROM = hasRamFactorROM
         a2 = a2_create(newModel)
-        model = newModel
         do {
             try loadROMs(from: dir)
             try setRamWorks(ramWorksEnabled)
-            try setRamFactor(ramFactorEnabled)
+            try setRamFactor(ramFactorWasEnabled)
             for (drive, url) in diskURLs.enumerated() {
                 if let url { try insertDisk(url, drive: drive) }
             }
         } catch {
             a2_destroy(a2)
             a2 = old
-            model = oldModel
             hasDiskROM = oldHasDiskROM
             hasRamFactorROM = oldHasRamFactorROM
             throw error
@@ -203,7 +201,6 @@ final class Emulator {
                 NSLocalizedDescriptionKey: "Could not enable RamFactor. Slot 1 must be free and 8 MB of memory available.",
             ])
         }
-        ramFactorEnabled = enabled
     }
 
     // MARK: Machine control
@@ -219,15 +216,17 @@ final class Emulator {
         midi.panic()
     }
 
-    func runFrame() {
+    func runFrame() { runFrame(warp: false) }
+
+    private func runFrame(warp: Bool) {
         if !pasteQueue.isEmpty && !a2_key_pending(a2) {
             a2_key_press(a2, pasteQueue.removeFirst())
         }
-        a2_run_frame(a2)
+        a2_run_frame_ex(a2, !warp)
         let n = audioScratch.withUnsafeMutableBufferPointer {
             a2_take_audio(a2, $0.baseAddress, $0.count / 2)
         }
-        audio.push(audioScratch, frames: n)
+        if !warp { audio.push(audioScratch, frames: n) }
 
         if midiSlot > 0 {
             let m = midiScratch.withUnsafeMutableBufferPointer {
@@ -235,6 +234,8 @@ final class Emulator {
             }
             if m > 0 { midi.feed(midiScratch[0..<m]) }
         }
+
+        guard !warp else { return }
 
         // Rate control: nudge the sample rate (at most ±1%, inaudible) so the
         // output queue stays near its target instead of draining or piling up.
@@ -251,27 +252,12 @@ final class Emulator {
 
     var shouldWarp: Bool { fastDisk && motorOn }
 
-    /// Runs frames without rendering until `deadline` or the drives stop; returns the count.
-    func runWarp(until deadline: CFTimeInterval) -> Int {
-        var frames = 0
+    /// Runs without rendering until `deadline` or the drives stop, then renders once.
+    func runWarp(until deadline: CFTimeInterval) {
         repeat {
-            if !pasteQueue.isEmpty && !a2_key_pending(a2) {
-                a2_key_press(a2, pasteQueue.removeFirst())
-            }
-            a2_run_frame_ex(a2, false)
-            frames += 1
-            audioScratch.withUnsafeMutableBufferPointer {
-                _ = a2_take_audio(a2, $0.baseAddress, $0.count / 2)   // discard
-            }
-            if midiSlot > 0 {
-                let m = midiScratch.withUnsafeMutableBufferPointer {
-                    a2_take_midi(a2, $0.baseAddress, $0.count)
-                }
-                if m > 0 { midi.feed(midiScratch[0..<m]) }
-            }
+            runFrame(warp: true)
         } while motorOn && CACurrentMediaTime() < deadline
         a2_render(a2)
-        return frames
     }
 
     func withFramebuffer<T>(_ body: (UnsafePointer<UInt32>) -> T) -> T {

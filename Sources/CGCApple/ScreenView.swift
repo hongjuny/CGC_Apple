@@ -106,7 +106,7 @@ final class ScreenView: NSView {
             return
         }
         var ch = event.characters?.unicodeScalars.first
-        if ch == nil || !(ch!.isASCII) || event.modifierFlags.contains(.control) {
+        if ch?.isASCII != true || event.modifierFlags.contains(.control) {
             if let pair = Self.usLayout[event.keyCode] {
                 let c = event.modifierFlags.contains(.shift) ? pair.1 : pair.0
                 ch = c.unicodeScalars.first
