@@ -469,7 +469,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private func fastDiskItem() -> NSMenuItem {
         emulator.fastDisk = !UserDefaults.standard.bool(forKey: Self.realDiskSpeedKey)
-        let i = NSMenuItem(title: "Fast Disk (Full Speed While a Drive Spins)", action: #selector(toggleFastDisk(_:)),
+        let i = NSMenuItem(title: "Fast Disk (Full Speed During Disk Access)", action: #selector(toggleFastDisk(_:)),
                            keyEquivalent: "f")
         i.keyEquivalentModifierMask = [.command, .shift]
         i.state = emulator.fastDisk ? .on : .off

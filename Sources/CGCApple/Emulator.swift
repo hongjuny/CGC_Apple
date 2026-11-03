@@ -275,18 +275,18 @@ final class Emulator {
         a2_set_audio_rate_adjust(a2, ratio)
     }
 
-    /// Fast disk: while a drive is spinning, run the machine flat out. Emulated
+    /// Fast disk: while a floppy spins or the hard disk is active, run flat out. Emulated
     /// time is untouched (so loaders and copy protection behave as on real
     /// hardware); only the wall clock is skipped. Sound made meanwhile is dropped.
     var fastDisk = true
 
-    var shouldWarp: Bool { fastDisk && motorOn }
+    var shouldWarp: Bool { fastDisk && (motorOn || hardDiskActive) }
 
-    /// Runs without rendering until `deadline` or the drives stop, then renders once.
+    /// Runs without rendering until `deadline` or disk activity ends, then renders once.
     func runWarp(until deadline: CFTimeInterval) {
         repeat {
             runFrame(warp: true)
-        } while motorOn && CACurrentMediaTime() < deadline
+        } while shouldWarp && CACurrentMediaTime() < deadline
         a2_render(a2)
     }
 

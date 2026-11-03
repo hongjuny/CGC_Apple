@@ -1,9 +1,47 @@
 import Foundation
+import QuartzCore
 import XCTest
 import A2Core
 @testable import CGCApple
 
 final class EmulatorHardDiskTests: XCTestCase {
+    @MainActor
+    func testHardDiskWarpHonorsSettingDeadlineAndIdle() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+
+        // Enter slot 7's firmware at reset; the boot block then idles without disk I/O.
+        var rom = Data(repeating: 0, count: 0x3000)
+        rom[0x2FFC] = 0; rom[0x2FFD] = 0xC7
+        try rom.write(to: root.appendingPathComponent("Apple2_Plus.rom"))
+        try Data(repeating: 0, count: 0x800).write(to: root.appendingPathComponent("Apple2_Video.rom"))
+        var image = Data(repeating: 0, count: 512)
+        image.replaceSubrange(0..<4, with: [0x01, 0x4C, 0x01, 0x08]) // JMP $0801
+        let hdv = root.appendingPathComponent("boot.hdv")
+        try image.write(to: hdv)
+
+        let emulator = Emulator(model: A2_MODEL_IIPLUS)
+        try emulator.loadROMs(from: root)
+        try emulator.mountHardDisk(hdv)
+        emulator.powerCycle()
+        XCTAssertFalse(emulator.shouldWarp)
+        emulator.runFrame()
+        XCTAssertTrue(emulator.hardDiskActive)
+        XCTAssertFalse(emulator.motorOn)
+        XCTAssertTrue(emulator.shouldWarp)
+
+        emulator.fastDisk = false
+        XCTAssertFalse(emulator.shouldWarp)
+        emulator.fastDisk = true
+        emulator.runWarp(until: 0) // Expired deadline returns while the hard disk is still active.
+        XCTAssertTrue(emulator.shouldWarp)
+        emulator.runWarp(until: CACurrentMediaTime() + 1)
+        XCTAssertFalse(emulator.hardDiskActive)
+        XCTAssertFalse(emulator.shouldWarp)
+    }
+
     @MainActor
     func testMountRoutingAndModelSwitch() throws {
         let fm = FileManager.default

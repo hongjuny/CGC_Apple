@@ -23,7 +23,7 @@ and a thin Swift/AppKit front end. **CGC** stands for **C**heon**g**gye**c**heon
 - **Disk II** (slot 6): emulated at the bit level.
   - Reads and writes `.dsk`/`.do`, `.po`, `.nib`, WOZ 1/2 and 140K 2IMG (`.2mg`) images. A 2IMG file keeps its header and chunks when saved.
   - Sector images are converted to GCR bit streams on insert and decoded back on save.
-  - Optional "fast disk" mode runs the whole machine at full speed while a drive spins. Emulated timing is unchanged, so loaders and copy protection still work.
+  - Optional "fast disk" mode runs the whole machine at full speed while a floppy spins or the slot 7 hard disk is active, returning to normal speed when activity ends. Emulated timing is unchanged, so loaders and copy protection still work.
 - **Sound**:
   - Speaker.
   - Mockingboard in slot 4 (two 6522 VIAs and two AY-3-8913 PSGs).
