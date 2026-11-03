@@ -148,6 +148,31 @@ int main(int argc, char **argv)
     failures += check("rejects odd-sized image", !a2_hd_insert(a2, raw, 1000, false));
     twoimg[0x0C] = 0;               // DOS-order 2IMG is a floppy, not a block device
     failures += check("rejects DOS-order 2IMG", !a2_hd_insert(a2, twoimg, sizeof twoimg, false));
+    a2_hd_insert(a2, raw, SIZE, false);
+    a2_power_cycle(a2);
+    a2->ram[0][0x43] = 0x70;
+    a2->ram[0][0x46] = a2->ram[0][0x47] = 0;
+    const uint16_t invalid[] = { 0xBE01, 0xC000, 0xC0F0, 0xCFFF, 0xFE01, 0xFFFF };
+    bool rejected = true;
+    for (int cmd = 1; cmd <= 2; cmd++) {
+        a2->ram[0][0x42] = (uint8_t)cmd;
+        for (size_t i = 0; i < sizeof invalid / sizeof *invalid; i++) {
+            a2->ram[0][0x44] = (uint8_t)invalid[i];
+            a2->ram[0][0x45] = (uint8_t)(invalid[i] >> 8);
+            rejected &= bus_read(a2, 0xC0F0) == 0x27;
+        }
+    }
+    failures += check("rejects I/O and wrapped buffers", rejected && !a2_hd_dirty(a2) &&
+                      memcmp(a2->hd.file, raw, SIZE) == 0);
+    const uint16_t valid[] = { 0xBE00, 0xD000, 0xFE00 };
+    bool accepted = true;
+    for (size_t i = 0; i < sizeof valid / sizeof *valid; i++) {
+        a2->ram[0][0x42] = 1;
+        a2->ram[0][0x44] = (uint8_t)valid[i];
+        a2->ram[0][0x45] = (uint8_t)(valid[i] >> 8);
+        accepted &= bus_read(a2, 0xC0F0) == 0;
+    }
+    failures += check("accepts RAM boundary buffers", accepted);
     a2_destroy(a2);
     printf(failures ? "FAIL\n" : "all PASS\n");
     return failures ? 1 : 0;

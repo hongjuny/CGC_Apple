@@ -143,6 +143,10 @@ static uint8_t hd_command(apple2 *a2)
     hd->last_access_frame = a2->frame_count;
     if ((unit & 0x80) || ((unit >> 4) & 7) != HD_SLOT)
         return ERR_NO_DEVICE;       // drive 2, or a unit mapped from another slot
+    // A transfer through I/O can re-enter the driver or change the MMU mid-copy.
+    uint32_t end = (uint32_t)buf + 512;
+    if ((cmd == 1 || cmd == 2) && (end > 0x10000 || (buf < 0xD000 && end > 0xC000)))
+        return ERR_IO;
     switch (cmd) {
     case 0:                         // STATUS
         return hd->write_protected ? ERR_WRITE_PROTECTED : ERR_NONE;

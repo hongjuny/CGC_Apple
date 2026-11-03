@@ -371,6 +371,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     @objc private func selectModel(_ sender: NSMenuItem) {
         let model = a2_model(rawValue: UInt32(sender.tag))
+        guard model != emulator.model, saveDisks() else { return }
         do {
             try emulator.switchModel(to: model)
         } catch {

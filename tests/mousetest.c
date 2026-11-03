@@ -153,6 +153,22 @@ static int test(const char *romdir, a2_model model)
     run_at(0x6800, 2);
     failures += check("HomeMouse: position at the clamp minimum",
                       zp[0x20] == 0 && zp[0x21] == 0 && zp[0x22] == 0 && zp[0x23] == 0);
+
+    // 6. PositionMouse uses the same signed coordinates as ClampMouse.
+    start(0x6A00);
+    store(0x9C, 0x478); store(0xFF, 0x578); // min -100
+    store(100, 0x4F8); store(0, 0x5F8);    // max 100
+    emit(2, 0xA9, 0); call(CLAMP);
+    emit(2, 0xA9, 1); call(CLAMP);
+    store(0xCE, 0x47A); store(0xFF, 0x57A); // X -50
+    store(0xB5, 0x4FA); store(0xFF, 0x5FA); // Y -75
+    call(POS); call(READ);
+    copy(0x47A, 0x20); copy(0x57A, 0x21); copy(0x4FA, 0x22); copy(0x5FA, 0x23);
+    finish(0x6A00);
+    run_at(0x6A00, 2);
+    failures += check("PositionMouse: signed X/Y in the clamp",
+                      (int16_t)(zp[0x20] | zp[0x21] << 8) == -50 &&
+                      (int16_t)(zp[0x22] | zp[0x23] << 8) == -75);
     a2_destroy(a2);
     return failures;
 }

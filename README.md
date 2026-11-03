@@ -110,9 +110,8 @@ them on the window; the right half of the window is drive 2.
 
 **Note:** when a program writes to a disk, the image file you opened is updated
 when the disk is ejected or the app quits. Keep backups of images you care
-about, especially WOZ images. If saving fails, the app reports the error and
-keeps the disk inserted; ejecting, replacing the disk, switching models and
-quitting are stopped until saving succeeds.
+about, especially WOZ images. If saving fails, choose **Cancel** to keep the
+disk and stop the operation, or **Discard Changes** to continue without saving.
 
 ### Typing Hangul with CALL3327 (3327 한글)
 
@@ -135,7 +134,7 @@ window. Where an image goes is decided by its content, not its name:
 
 - A 2IMG file (`.2mg`, `.2img`) holding a 140K floppy goes into a floppy drive; a bigger one goes to the hard disk.
 - `.hdv` and `.2meg` files are hard disk images.
-- Any other headerless image larger than a 140K floppy (a multiple of 512 bytes, such as an 800K or 32 MB `.po`) is mounted as a hard disk.
+- Headerless block images larger than a 140K floppy (a multiple of 512 bytes, such as an 800K or 32 MB `.po`) are mounted as hard disks, except for the floppy extensions listed below.
 - `.dsk`, `.do`, `.nib` and `.woz` files always go into a floppy drive.
 
 The machine restarts when a hard disk is mounted or unmounted, and the mounted

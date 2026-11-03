@@ -373,8 +373,6 @@ final class Emulator {
 
     // MARK: Hard disk (slot 7)
 
-    /// True for images that belong on the hard disk rather than a floppy drive:
-    /// .hdv and .2mg, and .po files larger than a 140K floppy.
     /// File name extensions the app opens: floppy and hard disk images alike.
     nonisolated static let imageExtensions = ["dsk", "do", "po", "nib", "woz", "hdv", "2mg", "2img", "2meg"]
 

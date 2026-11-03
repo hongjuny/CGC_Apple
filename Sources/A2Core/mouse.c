@@ -140,8 +140,8 @@ static uint8_t run(apple2 *a2, int fn, uint8_t a)
         write_position(a2);
         return 0;
     case FN_POS:
-        m->x = bus_read(a2, hole(0x478)) | bus_read(a2, hole(0x578)) << 8;
-        m->y = bus_read(a2, hole(0x4F8)) | bus_read(a2, hole(0x5F8)) << 8;
+        m->x = (int16_t)(bus_read(a2, hole(0x478)) | bus_read(a2, hole(0x578)) << 8);
+        m->y = (int16_t)(bus_read(a2, hole(0x4F8)) | bus_read(a2, hole(0x5F8)) << 8);
         clamp_position(m);
         m->host_valid = false;
         return 0;
