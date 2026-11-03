@@ -3,7 +3,7 @@ import A2Core
 import UniformTypeIdentifiers
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation {
     private let emulator = Emulator(model: AppDelegate.savedModel())
     private lazy var joystick = Joystick(emulator: emulator)
     private var window: NSWindow!
@@ -23,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private static let realDiskSpeedKey = "realDiskSpeed"
     private static let joystickKey = "joystickMode"
     private static let passportSlot = 2
+    private static let ramWorksKey = "ramWorksEnabled"
+    private static let ramFactorKey = "ramFactorEnabled"
 
     private static func savedModel() -> a2_model {
         let raw = UInt32(UserDefaults.standard.integer(forKey: modelKey))
@@ -50,6 +52,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard loadROMs() else {
             NSApp.terminate(nil)
             return
+        }
+        do {
+            try emulator.setRamWorks(UserDefaults.standard.bool(forKey: Self.ramWorksKey))
+            try emulator.setRamFactor(UserDefaults.standard.bool(forKey: Self.ramFactorKey))
+        } catch {
+            NSAlert(error: error).runModal()
         }
         emulator.powerCycle()
 
@@ -317,6 +325,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    @objc private func toggleRamWorks(_ sender: NSMenuItem) {
+        do {
+            try emulator.saveAllDisks()
+            try emulator.setRamWorks(!emulator.ramWorksEnabled)
+            UserDefaults.standard.set(emulator.ramWorksEnabled, forKey: Self.ramWorksKey)
+            emulator.powerCycle()
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+
+    @objc private func toggleRamFactor(_ sender: NSMenuItem) {
+        do {
+            try emulator.saveAllDisks()
+            try emulator.setRamFactor(!emulator.ramFactorEnabled)
+            UserDefaults.standard.set(emulator.ramFactorEnabled, forKey: Self.ramFactorKey)
+            emulator.powerCycle()
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(toggleRamWorks(_:)) {
+            menuItem.state = emulator.ramWorksActive ? .on : .off
+            return emulator.model != A2_MODEL_IIPLUS
+        }
+        if menuItem.action == #selector(toggleRamFactor(_:)) {
+            menuItem.state = emulator.ramFactorEnabled ? .on : .off
+        }
+        return true
+    }
+
     @objc private func selectJoystick(_ sender: NSMenuItem) {
         joystick.mode = Joystick.Mode(rawValue: sender.tag) ?? .keyboard
         UserDefaults.standard.set(sender.tag, forKey: Self.joystickKey)
@@ -411,6 +452,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let passport = item("Passport MIDI (Slot 2, Built-in GM Synth)", #selector(togglePassportMIDI(_:)))
         passport.state = emulator.midiSlot != 0 ? .on : .off
         submenu("Model", models + [.separator(), caps, .separator()] + boards + [.separator(), passport])
+        submenu("Memory", [
+            item("RamWorks III (8 MB, IIe AUX; Restarts Machine)", #selector(toggleRamWorks(_:))),
+            item("RamFactor (8 MB, Slot 1; Restarts Machine)", #selector(toggleRamFactor(_:))),
+        ])
         submenu("Machine", [
             item("Reset (Ctrl-RESET)", #selector(reset), "r"),
             item("Power Cycle", #selector(powerCycle), "r", [.command, .shift]),

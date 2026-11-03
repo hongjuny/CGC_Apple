@@ -77,10 +77,23 @@ int a2_mockingboards(const apple2 *a2);
 
 // Passport MIDI Interface in `slot` (1-7, conventionally 2); 0 removes it.
 // Slots used by other cards (4/5 with Mockingboards, 6 for the Disk II) are
-// refused. Returns the slot actually set.
+// refused (also slot 1 when RamFactor is installed). Returns the slot actually set.
 int a2_set_midi_slot(apple2 *a2, int slot);
 // Moves up to max MIDI bytes the card has transmitted into out.
 size_t a2_take_midi(apple2 *a2, uint8_t *out, size_t max);
+
+// AE memory cards, both modelled with 8 MB as in MAME. Disabled by default.
+// RamWorks III replaces the IIe auxiliary card (64 KB banks; video uses bank 0).
+// Enabling on a II+ or allocation failure returns false without changing the card.
+bool a2_set_ramworks(apple2 *a2, bool enabled);
+bool a2_ramworks(const apple2 *a2);
+// RamFactor occupies slot 1; its firmware must be loaded before enabling it.
+// Accepts one 8 KB ROM revision, not MAME's concatenated 32 KB region.
+bool a2_load_ramfactor_rom(apple2 *a2, const uint8_t *data, size_t len);
+// Enabling fails if slot 1 contains MIDI, firmware is missing or allocation fails.
+// Removing a card or power cycling discards its RAM; RESET preserves RAM.
+bool a2_set_ramfactor(apple2 *a2, bool enabled);
+bool a2_ramfactor(const apple2 *a2);
 
 // Keyboard: 7-bit ASCII. The II+ has no lowercase; letters are upper-cased.
 void a2_key_press(apple2 *a2, uint8_t ascii);

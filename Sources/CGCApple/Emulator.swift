@@ -14,6 +14,10 @@ final class Emulator {
     private var romDir: URL?
     private(set) var diskURLs: [URL?] = [nil, nil]
     private(set) var hasDiskROM = false
+    private(set) var hasRamFactorROM = false
+    private(set) var ramWorksEnabled = false
+    private(set) var ramFactorEnabled = false
+    var ramWorksActive: Bool { a2_ramworks(a2) }
     private var pasteQueue: [UInt8] = []
     private var audioScratch = [Int16](repeating: 0, count: 4096 * 2)   // stereo frames
     private var smoothedFill = Double(AudioOutput.targetFill)
@@ -54,6 +58,8 @@ final class Emulator {
         a2 = a2_create(model)
     }
 
+    deinit { a2_destroy(a2) }
+
     static func name(of model: a2_model) -> String {
         switch model {
         case A2_MODEL_IIE: return "Apple //e"
@@ -67,10 +73,13 @@ final class Emulator {
         guard newModel != model, let dir = romDir else { return }
         try saveAllDisks()
         let old = a2, oldModel = model, oldHasDiskROM = hasDiskROM
+        let oldHasRamFactorROM = hasRamFactorROM
         a2 = a2_create(newModel)
         model = newModel
         do {
             try loadROMs(from: dir)
+            try setRamWorks(ramWorksEnabled)
+            try setRamFactor(ramFactorEnabled)
             for (drive, url) in diskURLs.enumerated() {
                 if let url { try insertDisk(url, drive: drive) }
             }
@@ -79,6 +88,7 @@ final class Emulator {
             a2 = old
             model = oldModel
             hasDiskROM = oldHasDiskROM
+            hasRamFactorROM = oldHasRamFactorROM
             throw error
         }
         a2_destroy(old)
@@ -154,7 +164,46 @@ final class Emulator {
         if let disk = read(["DISK2.rom", "341-0027-a.p5", "341-0027.bin"]) {
             hasDiskROM = disk.withUnsafeBytes { a2_load_disk_rom(a2, $0.baseAddress, $0.count) }
         }
+        hasRamFactorROM = loadRamFactorROM(from: dir)
         romDir = dir
+    }
+
+    private func loadRamFactorROM(from dir: URL) -> Bool {
+        let names = ["RamFactor.rom", "ramfactor.rom", "ae ramfactor rom v1.4.bin",
+                     "ae ramfactor rom v1.3.bin", "ae ramfactor rom v1.1.bin", "ae ramfactor rom v1.0.bin"]
+        for name in names {
+            if let data = try? Data(contentsOf: dir.appendingPathComponent(name)),
+               data.withUnsafeBytes({ a2_load_ramfactor_rom(a2, $0.baseAddress, $0.count) }) {
+                return true
+            }
+        }
+        return false
+    }
+
+    // MARK: Memory cards
+
+    func setRamWorks(_ enabled: Bool) throws {
+        // Remember the IIe preference while using a II+.
+        guard a2_set_ramworks(a2, enabled && model != A2_MODEL_IIPLUS) else {
+            throw NSError(domain: "CGCApple", code: 3, userInfo: [
+                NSLocalizedDescriptionKey: "Could not allocate RamWorks memory.",
+            ])
+        }
+        ramWorksEnabled = enabled
+    }
+
+    func setRamFactor(_ enabled: Bool) throws {
+        if enabled && !hasRamFactorROM {
+            let dir = romDir ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            hasRamFactorROM = loadRamFactorROM(from: dir)
+            guard hasRamFactorROM else { throw ROMError.missing("RamFactor (8 KB, RamFactor.rom)", dir) }
+        }
+        guard a2_set_ramfactor(a2, enabled) else {
+            throw NSError(domain: "CGCApple", code: 4, userInfo: [
+                NSLocalizedDescriptionKey: "Could not enable RamFactor. Slot 1 must be free and 8 MB of memory available.",
+            ])
+        }
+        ramFactorEnabled = enabled
     }
 
     // MARK: Machine control

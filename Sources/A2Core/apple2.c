@@ -11,6 +11,8 @@ static void update_map(apple2 *a2)
 {
     bool e = a2_is_iie(a2);
     uint8_t *main_ram = a2->ram[0], *aux_ram = a2->ram[1];
+    if (a2->ramworks_extra && a2->ramworks_bank)
+        aux_ram = a2->ramworks_extra + (a2->ramworks_bank - 1) * 0x10000;
 
     // $0000-$01FF and the language card follow ALTZP.
     uint8_t *zp = (e && a2->altzp) ? aux_ram : main_ram;
@@ -245,8 +247,12 @@ static uint8_t io_access(apple2 *a2, uint16_t addr, bool write, uint8_t value)
         }
         return fb;
     }
-    case 0x7: // $C070 paddle trigger
+    case 0x7: // $C070 paddle trigger and RamWorks bank-select aliases
         a2->paddle_trigger_cycle = a2->cpu.cycles;
+        if (write && a2->ramworks_extra && (reg & 0x09) == 1) {
+            a2->ramworks_bank = value & 0x7F;
+            update_map(a2);
+        }
         break;
     case 0x8: // language card
         lc_access(a2, reg, write);
@@ -254,6 +260,8 @@ static uint8_t io_access(apple2 *a2, uint16_t addr, bool write, uint8_t value)
     case 0xE: // slot 6: Disk II
         return disk2_io(&a2->disk, reg & 0x0F, write, value, a2->cpu.cycles);
     default:
+        if ((reg >> 4) == 0x9 && a2->ramfactor_ram)
+            return ramfactor_io(a2, reg & 0x0F, write, value);
         if ((reg >> 4) - 8 == a2->midi_slot && a2->midi_slot > 0) {   // $C0n0: Passport MIDI
             if (write) {
                 midi_write(&a2->midi, reg & 0x0F, value, a2->cpu.cycles);
@@ -270,6 +278,9 @@ static uint8_t io_access(apple2 *a2, uint16_t addr, bool write, uint8_t value)
 static uint8_t slot_rom_read(apple2 *a2, uint16_t addr)
 {
     int page = addr >> 8;
+    bool card_c800 = a2->ramfactor_c800;
+    if (addr == 0xCFFF)
+        a2->ramfactor_c800 = false;
     if (a2_is_iie(a2)) {
         bool internal;
         if (page == 0xC3) {
@@ -286,6 +297,14 @@ static uint8_t slot_rom_read(apple2 *a2, uint16_t addr)
             a2->intc8rom = false;
         if (internal)
             return v;
+    }
+    if (a2->ramfactor_ram) {
+        if (page == 0xC1) {
+            a2->ramfactor_c800 = true;
+            return ramfactor_rom_read(a2, addr);
+        }
+        if (page >= 0xC8 && card_c800)
+            return ramfactor_rom_read(a2, addr);
     }
     if (page >= 0xC4 && page - 0xC4 < a2->mb_count)
         return mb_read(&a2->mb[page - 0xC4], addr & 0xFF);
@@ -317,9 +336,40 @@ static void mem_write(void *ctx, uint16_t addr, uint8_t value)
                !(a2_is_iie(a2) && a2->intcxrom)) {
         mb_catch_up(a2);
         mb_write(&a2->mb[(addr >> 8) - 0xC4], addr & 0xFF, value);
-    } else if (addr == 0xCFFF && a2_is_iie(a2)) {
+    } else if ((addr >> 8) == 0xC1 && a2->ramfactor_ram) {
+        // INTCXROM gates reads; writes still reach the peripheral slot.
+        a2->ramfactor_c800 = true;
+    } else if (addr == 0xCFFF) {
+        a2->ramfactor_c800 = false;
         a2->intc8rom = false;
     }
+}
+
+// RamWorks bank switches follow MAME's bus/a2bus/a2eramworks3.cpp
+// (BSD-3-Clause, R. Belmont); video always reads the original auxiliary bank.
+bool a2_set_ramworks(apple2 *a2, bool enabled)
+{
+    if (enabled && !a2_is_iie(a2))
+        return false;
+    if (enabled == (a2->ramworks_extra != NULL))
+        return true;
+    if (enabled) {
+        uint8_t *ram = calloc(RAMWORKS_EXTRA_SIZE, 1);
+        if (!ram)
+            return false;
+        a2->ramworks_extra = ram;
+    } else {
+        free(a2->ramworks_extra);
+        a2->ramworks_extra = NULL;
+    }
+    a2->ramworks_bank = 0;
+    update_map(a2);
+    return true;
+}
+
+bool a2_ramworks(const apple2 *a2)
+{
+    return a2->ramworks_extra != NULL;
 }
 
 // ---- lifecycle ----------------------------------------------------------------
@@ -377,7 +427,7 @@ int a2_mockingboards(const apple2 *a2)
 
 int a2_set_midi_slot(apple2 *a2, int slot)
 {
-    bool taken = slot == 6 || (slot >= 4 && slot - 4 < a2->mb_count);
+    bool taken = slot == 6 || (slot == 1 && a2->ramfactor_ram) || (slot >= 4 && slot - 4 < a2->mb_count);
     if (slot < 0 || slot > 7 || taken)
         slot = 0;
     if (slot != a2->midi_slot)
@@ -403,6 +453,8 @@ void a2_destroy(apple2 *a2)
         return;
     disk2_eject(&a2->disk, 0);
     disk2_eject(&a2->disk, 1);
+    free(a2->ramworks_extra);
+    free(a2->ramfactor_ram);
     free(a2);
 }
 
@@ -441,6 +493,8 @@ bool a2_load_disk_rom(apple2 *a2, const uint8_t *data, size_t len)
 
 static void reset_switches(apple2 *a2)
 {
+    a2->ramworks_bank = 0;
+    ramfactor_reset(a2);
     if (a2_is_iie(a2)) {
         // All MMU switches off and the built-in language card reset (Sather, Fig 5.13).
         a2->store80 = a2->ramrd = a2->ramwrt = a2->intcxrom = false;
@@ -465,6 +519,10 @@ void a2_power_cycle(apple2 *a2)
     // The language card RAM ($D000-$FFFF, and bank 1 kept at $C000) starts cleared.
     for (int b = 0; b < 2; b++)
         memset(a2->ram[b] + 0xC000, 0, 0x4000);
+    if (a2->ramworks_extra)
+        memset(a2->ramworks_extra, 0, RAMWORKS_EXTRA_SIZE);
+    if (a2->ramfactor_ram)
+        memset(a2->ramfactor_ram, 0xFF, EXPANSION_RAM_SIZE);
     a2->lc_read_ram = false;
     a2->lc_write_enable = true;
     a2->lc_prewrite = false;

@@ -111,6 +111,16 @@ int main(int argc, char **argv)
     if (!getenv("NODISKROM"))   // NODISKROM=1: no boot PROM, so the II+ drops into BASIC
         load_rom(a2, argv[1], "DISK2.rom", a2_load_disk_rom);
 
+    if (getenv("RAMWORKS") && !a2_set_ramworks(a2, true)) {
+        fprintf(stderr, "RamWorks requires a IIe and available memory\n");
+        return 1;
+    }
+    if (getenv("RAMFACTOR") &&
+        (!load_rom(a2, argv[1], "RamFactor.rom", a2_load_ramfactor_rom) || !a2_set_ramfactor(a2, true))) {
+        fprintf(stderr, "RamFactor requires an 8 KB RamFactor.rom and free slot 1\n");
+        return 1;
+    }
+
     if (argc > 2 && argv[2][0]) {
         size_t len;
         uint8_t *img = slurp(argv[2], &len);

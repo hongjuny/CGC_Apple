@@ -11,6 +11,7 @@ portable C core plus a thin Swift/AppKit front end.
 - **Machines**: Apple ][+, Apple //e, and enhanced Apple //e.
 - **CPU**: NMOS 6502 and 65C02. Both pass Klaus Dormann's functional test suites.
 - **Memory**: 48K plus a 16K language card on the ][+, and 128K with auxiliary memory and the full MMU and IOU soft switches on the //e.
+- **AE memory expansion**: optional RamWorks III (IIe AUX slot) and RamFactor (slot 1), each with 8 MB, following MAME's capacity model. Both can be installed together on a IIe.
 - **Video**:
   - 40- and 80-column text with the //e character set (lowercase, alternate set, MouseText).
   - Lo-res, hi-res, double lo-res and double hi-res.
@@ -61,6 +62,30 @@ AppleWin's file names and MAME's split ROM names are both accepted.
 
 MAME's ROM definitions (`apple2p`, `apple2e`, `apple2ee`, `diskiing`) list the
 SHA-1 of each part. Use them to check your dumps.
+
+## Memory cards
+
+The **Memory** menu enables or disables either card and remembers your settings.
+Changing a card saves disk images and power cycles the machine, clearing working
+RAM. Both cards are off by default; slot 7 is reserved for a future hard disk controller.
+
+- **RamWorks III**: IIe and enhanced IIe only. Expands auxiliary memory to 8 MB
+  in 128 banks of 64 KB (plus the machine's 64 KB main RAM). Bank 0 supplies video;
+  CPU bank selection applies to RAMRD/RAMWRT, ALTZP, language-card RAM and 80STORE.
+  No extra ROM is needed. Its setting is retained while using a II+ and takes
+  effect again when switching back to a IIe.
+- **RamFactor**: II+ and both IIe models, in **slot 1**. Provides 8 MB accessed
+  through address/data ports, plus firmware for RAM-disk use. Supply your own
+  **8,192-byte** ROM revision as `RamFactor.rom` in the same folder as the system
+  ROMs. MAME names `ae ramfactor rom v1.4.bin`, `v1.3.bin`, `v1.1.bin` and `v1.0.bin`
+  (each with the full `ae ramfactor rom ` prefix) are also accepted. A combined
+  32 KB MAME ROM region is not accepted. If the ROM is missing or invalid,
+  enabling the card reports an error and leaves it off.
+
+These cards require software that supports their memory interfaces; they do not
+increase Applesoft BASIC's ordinary program space. **Ctrl-RESET preserves card
+RAM**, but power cycling, switching models, removing cards or quitting discards it.
+RamFactor battery backup and persistence are not emulated.
 
 ## Disks
 
@@ -114,12 +139,13 @@ The macOS input source does not matter (한글 입력기를 켜 두어도 됩니
 
 ## Tests
 
-`swift test` checks disk save failures and model-switch rollback in the Swift wrapper.
+`swift test` checks disk save failures, model-switch rollback, memory-card configuration and optional ROM loading in the Swift wrapper.
 
 The headless tests in `tests/` build against the C core with clang:
 
 - `cputest.c`: Klaus Dormann's 6502 and 65C02 functional tests. Download the binaries from [Klaus2m5/6502_65C02_functional_tests](https://github.com/Klaus2m5/6502_65C02_functional_tests); they are not included.
-- `boottest.c`: boots ROMs and disks, types keys, dumps the text screen and screenshots.
+- `boottest.c`: boots ROMs and disks, types keys, dumps the text screen and screenshots. `RAMWORKS=1` enables RamWorks (with `A2MODEL=iie` or `iiee`); `RAMFACTOR=1` enables RamFactor using `RamFactor.rom`.
+- `memorytest.c`: RamWorks bank isolation, MMU and fixed video bank; RamFactor full-capacity access, pointer carry/wrap, slot ROM banking/arbitration, reset and slot conflicts. Uses synthetic firmware; no external ROMs required.
 - `disktest.c`: round trips between `.dsk`, `.po`, `.nib` and WOZ 2, plus malformed-image rejection and preservation of inserted disks.
 - `mbtest.c`: Mockingboard tone frequency, channel separation and VIA timer IRQ rate.
 - `miditest.c`: Passport MIDI ACIA byte stream and rate, and PTM IRQ rate.
@@ -127,6 +153,8 @@ The headless tests in `tests/` build against the C core with clang:
 ```sh
 clang -O2 -ISources/A2Core/include -ISources/A2Core -o /tmp/mbtest tests/mbtest.c Sources/A2Core/*.c
 /tmp/mbtest roms
+clang -O2 -ISources/A2Core/include -ISources/A2Core -o /tmp/memorytest tests/memorytest.c Sources/A2Core/*.c
+/tmp/memorytest
 ```
 
 ## Sources and acknowledgements
@@ -143,6 +171,7 @@ understood from MAME, its header comment names the MAME source file.
   - `src/devices/bus/a2bus/a2diskiing.cpp` and `machine/wozfdc.cpp`: Disk II.
   - `a2mockingboard.cpp`, `sound/ay8910.cpp` and `machine/6522via.cpp`: Mockingboard.
   - `a2midi.cpp` and `machine/6840ptm.cpp`: Passport MIDI.
+  - `a2eramworks3.cpp` and `a2memexp.cpp`: RamWorks III and RamFactor memory banking and register behaviour.
 - **[Klaus Dormann's 6502/65C02 functional tests](https://github.com/Klaus2m5/6502_65C02_functional_tests)** (GPL-3.0): used to verify the CPU core. They are not redistributed here.
 - **[WOZ disk image reference](https://applesaucefdc.com/woz/reference2/)** by John K. Morris (Applesauce): the WOZ 1/2 file format, including the "fake bit" behaviour on long runs of zero bits.
 - **Blip_Buffer** by Shay Green (blargg): the idea behind the band-limited step synthesis in `audio.c`.

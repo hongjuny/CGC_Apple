@@ -14,6 +14,8 @@
 #define DISK_TRACK_LEN  6656        // nibbles per .nib track
 #define DISK_QTRACKS    160         // quarter-track positions (WOZ TMAP)
 #define AUDIO_BUF_LEN   8192
+#define EXPANSION_RAM_SIZE (8 * 1024 * 1024)
+#define RAMWORKS_EXTRA_SIZE (EXPANSION_RAM_SIZE - 0x10000)
 
 // A disk is a set of bit-stream tracks addressed through a quarter-track map,
 // as in the WOZ format; sector and nibble images are converted on insert.
@@ -123,6 +125,16 @@ struct apple2 {
     // $C000-$CFFF of each bank holds language-card $D000 bank 1, which is
     // never addressable there directly.
     uint8_t ram[2][0x10000];
+    // RamWorks bank 0 stays in ram[1], so video never follows CPU bank switching.
+    uint8_t *ramworks_extra;       // banks 1..127
+    uint8_t ramworks_bank;
+
+    uint8_t *ramfactor_ram;        // slot 1, 8 MB
+    uint8_t ramfactor_rom[0x2000];
+    bool ramfactor_rom_loaded, ramfactor_c800;
+    uint8_t ramfactor_regs[16];
+    uint32_t ramfactor_address, ramfactor_cursor;
+
     uint8_t rom[0x4000];            // $C000-$FFFF (the II+ uses only $D000-$FFFF)
     uint8_t char_rom[0x1000];
     bool rom_loaded;
@@ -176,6 +188,11 @@ static inline bool a2_is_iie(const apple2 *a2)
 {
     return a2->model != A2_MODEL_IIPLUS;
 }
+
+// memory.c
+void ramfactor_reset(apple2 *a2);
+uint8_t ramfactor_io(apple2 *a2, uint8_t reg, bool write, uint8_t value);
+uint8_t ramfactor_rom_read(const apple2 *a2, uint16_t addr);
 
 // disk2.c
 void disk2_power_on(disk2 *d);
