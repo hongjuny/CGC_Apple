@@ -28,6 +28,7 @@ and a thin Swift/AppKit front end. **CGC** stands for **C**heon**g**gye**c**heon
   - Speaker.
   - One or two Mockingboards (two 6522 VIAs and two AY-3-8913 PSGs each, in slots 4 and 5).
   - Band-limited step synthesis keeps the square waves clean, and a jitter buffer with rate control prevents dropouts.
+- **Hard disk** (slot 7): a ProDOS block device with built-in firmware, so no ROM is needed. It mounts `.hdv`/`.po` images up to 32 MB and ProDOS-order `.2mg` images (see below).
 - **Passport MIDI** (slot 2): a 6840 PTM and a 6850 ACIA, played on macOS's built-in General MIDI synthesizer.
 - **Joystick**: from the arrow keys, the mouse, or a game controller (GameController framework). The Option keys work as buttons 0 and 1 (Open/Closed Apple on the //e).
 - **Hangul**: runs CALL3327, the 1986 Korean Hangul I/O program. Its disk is inserted by default when it is present (see below).
@@ -126,6 +127,22 @@ comes from its entry point, `CALL 3327` ($0CFF).
 
 The macOS input source does not matter (한글 입력기를 켜 두어도 됩니다). Keys are taken by their US-layout position.
 
+### Hard disk (slot 7)
+
+Mount a ProDOS hard disk image from the Disk menu (⌥⌘O), or drop it on the
+window. `.hdv` and `.2mg` images always go to the hard disk, and so do `.po`
+images larger than a 140K floppy. The machine restarts when a hard disk is
+mounted or unmounted, and the mounted image is remembered across launches.
+
+Slot 7 is scanned first at power-on, so the machine boots from the hard disk
+even with a floppy in drive 1. To boot the floppy instead, type `PR#6` or
+unmount the hard disk (⌥⌘E). Writes are saved to the image file, like floppy
+writes.
+
+This card is not a copy of any real hardware. It is an emulator-specific card
+like AppleWin's hard disk: its firmware passes each ProDOS block request to the
+emulator through one I/O register.
+
 ## Keys
 
 | Key | Action |
@@ -134,6 +151,7 @@ The macOS input source does not matter (한글 입력기를 켜 두어도 됩니
 | ⇧⌘R | Power cycle |
 | ⌘P | Pause |
 | ⇧⌘F | Fast disk on/off |
+| ⌥⌘O / ⌥⌘E | Mount / unmount hard disk |
 | ⇧⌘K | Caps Lock (//e) |
 | ⌘1 … ⌘4 | Colour / green / amber / white monitor |
 | ⌘L | Scanlines |
@@ -152,6 +170,7 @@ The headless tests in `tests/` build against the C core with clang:
 - `disktest.c`: round trips between `.dsk`, `.po`, `.nib` and WOZ 2, plus malformed-image rejection and preservation of inserted disks.
 - `mbtest.c`: Mockingboard tone frequency, channel separation and VIA timer IRQ rate.
 - `miditest.c`: Passport MIDI ACIA byte stream and rate, and PTM IRQ rate.
+- `hdtest.c`: boots a hard disk image from slot 7 on all three machines, and checks ProDOS STATUS, READ and WRITE, the error codes, 2IMG and write protection.
 
 ```sh
 clang -O2 -ISources/A2Core/include -ISources/A2Core -o /tmp/mbtest tests/mbtest.c Sources/A2Core/*.c

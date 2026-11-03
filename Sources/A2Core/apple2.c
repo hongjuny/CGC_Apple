@@ -260,6 +260,8 @@ static uint8_t io_access(apple2 *a2, uint16_t addr, bool write, uint8_t value)
     case 0xE: // slot 6: Disk II
         return disk2_io(&a2->disk, reg & 0x0F, write, value, a2->cpu.cycles);
     default:
+        if ((reg >> 4) == 0xF && a2->hd.file)     // $C0F0: slot 7 hard disk
+            return hd_io(a2, reg & 0x0F, write);
         if ((reg >> 4) == 0x9 && a2->ramfactor_ram)
             return ramfactor_io(a2, reg & 0x0F, write, value);
         if ((reg >> 4) - 8 == a2->midi_slot && a2->midi_slot > 0) {   // $C0n0: Passport MIDI
@@ -308,6 +310,8 @@ static uint8_t slot_rom_read(apple2 *a2, uint16_t addr)
     }
     if (page >= 0xC4 && page - 0xC4 < a2->mb_count)
         return mb_read(&a2->mb[page - 0xC4], addr & 0xFF);
+    if (page == 0xC7 && a2->hd.file)
+        return hd_rom_read(a2, addr);
     if (page == 0xC6 && a2->disk.rom_loaded)
         return a2->disk.rom[addr & 0xFF];
     return floating_bus(a2);
@@ -345,6 +349,9 @@ static void mem_write(void *ctx, uint16_t addr, uint8_t value)
             a2->intc8rom = false;
     }
 }
+
+uint8_t bus_read(apple2 *a2, uint16_t addr) { return mem_read(a2, addr); }
+void bus_write(apple2 *a2, uint16_t addr, uint8_t value) { mem_write(a2, addr, value); }
 
 // RamWorks bank switches follow MAME's bus/a2bus/a2eramworks3.cpp
 // (BSD-3-Clause, R. Belmont); video always reads the original auxiliary bank.
@@ -428,7 +435,7 @@ int a2_mockingboards(const apple2 *a2)
 
 int a2_set_midi_slot(apple2 *a2, int slot)
 {
-    bool taken = slot == 6 || (slot == 1 && a2->ramfactor_ram) || (slot >= 4 && slot - 4 < a2->mb_count);
+    bool taken = slot == 6 || (slot == 7 && a2->hd.file) || (slot == 1 && a2->ramfactor_ram) || (slot >= 4 && slot - 4 < a2->mb_count);
     if (slot < 0 || slot > 7 || taken)
         slot = 0;
     if (slot != a2->midi_slot)
@@ -456,6 +463,7 @@ void a2_destroy(apple2 *a2)
     disk2_eject(&a2->disk, 1);
     free(a2->ramworks_extra);
     free(a2->ramfactor_ram);
+    a2_hd_eject(a2);
     free(a2);
 }
 

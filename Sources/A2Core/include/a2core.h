@@ -111,6 +111,20 @@ bool a2_disk_present(const apple2 *a2, int drive);
 bool a2_disk_dirty(const apple2 *a2, int drive);
 // Clears the modified flag, after the image is saved or its changes are discarded.
 void a2_disk_mark_clean(apple2 *a2, int drive);
+
+// Hard disk in slot 7: a ProDOS block device with built-in firmware, so no ROM
+// is needed. Accepts raw ProDOS-order images (.hdv, .po) up to 32 MB and
+// ProDOS-order 2IMG (.2mg). While mounted, slot 7 boots before the Disk II.
+// Insert fails on a bad image or when the MIDI card uses slot 7.
+bool a2_hd_insert(apple2 *a2, const uint8_t *data, size_t len, bool write_protected);
+void a2_hd_eject(apple2 *a2);
+bool a2_hd_present(const apple2 *a2);
+bool a2_hd_dirty(const apple2 *a2);
+void a2_hd_mark_clean(apple2 *a2);
+bool a2_hd_active(const apple2 *a2);    // accessed in the last few frames
+// The whole image file, with any 2IMG header, as it should be saved.
+size_t a2_hd_export_size(const apple2 *a2);
+size_t a2_hd_export(apple2 *a2, uint8_t *out, size_t max);
 // Writes the (possibly modified) image back in its original format into out.
 // a2_disk_export_size gives the buffer size needed. Returns the number of
 // bytes written, or 0 on failure.

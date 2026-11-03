@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private static let passportSlot = 2
     private static let ramWorksKey = "ramWorksEnabled"
     private static let ramFactorKey = "ramFactorEnabled"
+    private static let hardDiskKey = "hardDiskPath"
 
     private static func savedModel() -> a2_model {
         let raw = UInt32(UserDefaults.standard.integer(forKey: modelKey))
@@ -65,15 +66,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             UserDefaults.standard.set(false, forKey: Self.ramFactorKey)
             NSAlert(error: error).runModal()
         }
+        // The hard disk mounted last time stays mounted; a vanished image is forgotten.
+        if let path = UserDefaults.standard.string(forKey: Self.hardDiskKey) {
+            do {
+                try emulator.mountHardDisk(URL(fileURLWithPath: path))
+            } catch {
+                UserDefaults.standard.removeObject(forKey: Self.hardDiskKey)
+            }
+        }
         emulator.powerCycle()
 
-        // Disk images passed on the command line go into drives 1 and 2.
-        let diskArgs = CommandLine.arguments.dropFirst()
-            .filter { ["dsk", "do", "po", "nib", "woz"].contains(($0 as NSString).pathExtension.lowercased()) }
-        for (i, path) in diskArgs.prefix(2).enumerated() {
-            insert(URL(fileURLWithPath: path), drive: i)
+        // Disk images passed on the command line: floppies go into drives 1 and 2,
+        // a hard disk image is mounted in slot 7.
+        let args = CommandLine.arguments.dropFirst().map { URL(fileURLWithPath: $0) }
+            .filter { ["dsk", "do", "po", "nib", "woz", "hdv", "2mg"].contains($0.pathExtension.lowercased()) }
+        let floppies = args.filter { !Emulator.isHardDiskImage($0) }
+        for (i, url) in floppies.prefix(2).enumerated() {
+            insert(url, drive: i)
         }
-        if diskArgs.isEmpty, let disk = defaultDisk() {
+        if let hd = args.first(where: Emulator.isHardDiskImage) {
+            mountHardDisk(hd)
+        }
+        if floppies.isEmpty, let disk = defaultDisk() {
             insert(disk, drive: 0)
         }
 
@@ -91,7 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     /// Saves modified disks. If saving fails, asks whether to discard the
     /// changes; returns false only when the user cancels.
-    private func saveDisks(drives: [Int] = [0, 1]) -> Bool {
+    private func saveDisks(drives: [Int] = [0, 1, Emulator.hardDisk]) -> Bool {
         for drive in drives {
             do {
                 try emulator.saveDisk(drive: drive)
@@ -106,7 +120,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func confirmDiscard(drive: Int, error: Error) -> Bool {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Could not save the disk in drive \(drive + 1)"
+        alert.messageText = drive == Emulator.hardDisk
+            ? "Could not save the hard disk"
+            : "Could not save the disk in drive \(drive + 1)"
         alert.informativeText = error.localizedDescription
             + "\n\nDiscard the changes made to this disk, or cancel and keep it inserted?"
         alert.addButton(withTitle: "Cancel")
@@ -115,7 +131,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        for (i, url) in urls.prefix(2).enumerated() { insert(url, drive: i) }
+        let floppies = urls.filter { !Emulator.isHardDiskImage($0) }
+        for (i, url) in floppies.prefix(2).enumerated() { insert(url, drive: i) }
+        if let hd = urls.first(where: Emulator.isHardDiskImage) { mountHardDisk(hd) }
     }
 
     // MARK: ROM discovery
@@ -249,7 +267,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func updateStatus() {
         let names = emulator.diskURLs.map { $0?.lastPathComponent ?? "—" }
         var status = "D1: \(names[0])   D2: \(names[1])"
+        if let hd = emulator.hardDiskURL { status += "   HD: \(hd.lastPathComponent)" }
         if emulator.motorOn { status += "   ● D\(emulator.activeDrive + 1)" }
+        if emulator.hardDiskActive { status += "   ● HD" }
         if status != lastStatus {
             window.subtitle = status
             lastStatus = status
@@ -259,6 +279,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     // MARK: Actions
 
     private func insert(_ url: URL, drive: Int) {
+        if Emulator.isHardDiskImage(url) {
+            mountHardDisk(url)
+            return
+        }
         guard saveDisks(drives: [drive]) else { return }
         do {
             try emulator.insertDisk(url, drive: drive)
@@ -275,6 +299,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         panel.allowsOtherFileTypes = true
         if panel.runModal() == .OK, let url = panel.url {
             insert(url, drive: drive)
+        }
+    }
+
+    /// Mounts a hard disk image in slot 7 and restarts, so the machine boots from it.
+    private func mountHardDisk(_ url: URL) {
+        guard saveDisks() else { return }
+        do {
+            try emulator.mountHardDisk(url)
+            UserDefaults.standard.set(url.path, forKey: Self.hardDiskKey)
+            NSDocumentController.shared.noteNewRecentDocumentURL(url)
+            emulator.powerCycle()
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+
+    @objc private func chooseHardDisk() {
+        let panel = NSOpenPanel()
+        panel.message = "Hard disk image for slot 7 (ProDOS order)"
+        panel.allowedContentTypes = ["hdv", "po", "2mg"].compactMap { UTType(filenameExtension: $0) }
+        panel.allowsOtherFileTypes = true
+        if panel.runModal() == .OK, let url = panel.url {
+            mountHardDisk(url)
+        }
+    }
+
+    @objc private func unmountHardDisk() {
+        guard emulator.hardDiskURL != nil, saveDisks() else { return }
+        do {
+            try emulator.unmountHardDisk()
+            UserDefaults.standard.removeObject(forKey: Self.hardDiskKey)
+            emulator.powerCycle()
+        } catch {
+            NSAlert(error: error).runModal()
         }
     }
 
@@ -435,6 +493,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             .separator(),
             item("Eject Drive 1", #selector(ejectDisk1), "e"),
             item("Eject Drive 2", #selector(ejectDisk2), "e", [.command, .shift]),
+            .separator(),
+            item("Mount Hard Disk (Slot 7; Restarts Machine)…", #selector(chooseHardDisk), "o", [.command, .option]),
+            item("Unmount Hard Disk (Restarts Machine)", #selector(unmountHardDisk), "e", [.command, .option]),
         ])
         submenu("Edit", [
             item("Paste (Type In)", #selector(paste(_:)), "v"),

@@ -117,6 +117,16 @@ typedef struct {
     size_t out_count;
 } passport_midi;
 
+typedef struct {
+    uint8_t *file;                  // whole image file (2IMG header kept for saving)
+    size_t file_len, data_off;      // ProDOS blocks start at data_off
+    uint32_t blocks;
+    bool write_protected, dirty;
+    bool accessed;
+    unsigned last_access_frame;     // for the activity indicator
+    uint8_t rom[256];               // slot 7 firmware
+} harddisk;
+
 struct apple2 {
     a2_model model;
     cpu6502 cpu;
@@ -179,6 +189,8 @@ struct apple2 {
     int midi_slot;                  // Passport MIDI card slot, 0 = none
     passport_midi midi;
 
+    harddisk hd;                    // slot 7, present while an image is mounted
+
     a2_monitor monitor;
     bool scanlines;
     uint32_t fb[A2_SCREEN_W * A2_SCREEN_H];
@@ -188,6 +200,14 @@ static inline bool a2_is_iie(const apple2 *a2)
 {
     return a2->model != A2_MODEL_IIPLUS;
 }
+
+// apple2.c: CPU-view memory access (honours the IIe banking switches)
+uint8_t bus_read(apple2 *a2, uint16_t addr);
+void bus_write(apple2 *a2, uint16_t addr, uint8_t value);
+
+// harddisk.c
+uint8_t hd_rom_read(const apple2 *a2, uint16_t addr);
+uint8_t hd_io(apple2 *a2, uint8_t reg, bool write);
 
 // memory.c
 void ramfactor_reset(apple2 *a2);

@@ -13,6 +13,10 @@ final class Emulator {
     var model: a2_model { a2_get_model(a2) }
     private(set) var romDir: URL?
     private(set) var diskURLs: [URL?] = [nil, nil]
+    /// Image mounted on the slot 7 hard disk.
+    private(set) var hardDiskURL: URL?
+    /// Pseudo drive number for the hard disk in save and discard calls.
+    nonisolated static let hardDisk = 2
     private(set) var hasDiskROM = false
     private(set) var hasRamFactorROM = false
     private(set) var ramWorksEnabled = false
@@ -82,6 +86,7 @@ final class Emulator {
             for (drive, url) in diskURLs.enumerated() {
                 if let url { try insertDisk(url, drive: drive) }
             }
+            if let url = hardDiskURL { try mountHardDisk(url) }
         } catch {
             a2_destroy(a2)
             a2 = old
@@ -331,8 +336,60 @@ final class Emulator {
         diskURLs[drive] = nil
     }
 
-    /// Writes a modified disk back to its file.
+    // MARK: Hard disk (slot 7)
+
+    /// True for images that belong on the hard disk rather than a floppy drive:
+    /// .hdv and .2mg, and .po files larger than a 140K floppy.
+    static func isHardDiskImage(_ url: URL) -> Bool {
+        switch url.pathExtension.lowercased() {
+        case "hdv", "2mg": return true
+        case "po":
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+            return size != Int(A2_DSK_SIZE)
+        default: return false
+        }
+    }
+
+    func mountHardDisk(_ url: URL) throws {
+        try saveDisk(drive: Self.hardDisk)
+        let data = try Data(contentsOf: url)
+        let writable = FileManager.default.isWritableFile(atPath: url.path)
+        let ok = data.withUnsafeBytes { a2_hd_insert(a2, $0.baseAddress, $0.count, !writable) }
+        guard ok else {
+            throw NSError(domain: "CGCApple", code: 5, userInfo: [
+                NSLocalizedDescriptionKey: "\(url.lastPathComponent): not a ProDOS-order hard disk image " +
+                    "(.hdv/.po up to 32 MB, or a ProDOS-order .2mg)",
+            ])
+        }
+        hardDiskURL = url
+    }
+
+    func unmountHardDisk() throws {
+        try saveDisk(drive: Self.hardDisk)
+        a2_hd_eject(a2)
+        hardDiskURL = nil
+    }
+
+    var hardDiskActive: Bool { a2_hd_active(a2) }
+
+    private func saveHardDisk() throws {
+        guard let url = hardDiskURL, a2_hd_dirty(a2) else { return }
+        var buf = [UInt8](repeating: 0, count: a2_hd_export_size(a2))
+        let n = buf.withUnsafeMutableBufferPointer { a2_hd_export(a2, $0.baseAddress, $0.count) }
+        guard n > 0 else {
+            throw NSError(domain: "CGCApple", code: 6, userInfo: [
+                NSLocalizedDescriptionKey: "Could not export \(url.lastPathComponent). The hard disk remains mounted.",
+            ])
+        }
+        try Data(buf[0..<n]).write(to: url, options: .atomic)
+        a2_hd_mark_clean(a2)
+    }
+
+    // MARK: Saving
+
+    /// Writes a modified disk (drive 0, 1 or `Emulator.hardDisk`) back to its file.
     func saveDisk(drive: Int) throws {
+        if drive == Self.hardDisk { return try saveHardDisk() }
         guard let url = diskURLs[drive], a2_disk_dirty(a2, Int32(drive)) else { return }
         var buf = [UInt8](repeating: 0, count: a2_disk_export_size(a2, Int32(drive)))
         let n = buf.withUnsafeMutableBufferPointer {
@@ -349,11 +406,16 @@ final class Emulator {
 
     /// Forgets unsaved writes so the disk can be ejected or the app closed without saving.
     func discardDiskChanges(drive: Int) {
-        a2_disk_mark_clean(a2, Int32(drive))
+        if drive == Self.hardDisk {
+            a2_hd_mark_clean(a2)
+        } else {
+            a2_disk_mark_clean(a2, Int32(drive))
+        }
     }
 
     func saveAllDisks() throws {
         try saveDisk(drive: 0)
         try saveDisk(drive: 1)
+        try saveDisk(drive: Self.hardDisk)
     }
 }
