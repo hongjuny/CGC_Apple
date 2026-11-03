@@ -4,7 +4,7 @@ import GameController
 /// Apple II joystick emulation: paddle 0 is X, paddle 1 is Y (0..255, 127 =
 /// centre), buttons 0 and 1. The axes come from the arrow keys, the mouse or a
 /// game controller depending on the mode; the Option keys always work as the
-/// buttons as well.
+/// buttons as well, and the ` ~ key is button 1 while a joystick mode is on.
 @MainActor
 final class Joystick {
     enum Mode: Int, CaseIterable {
@@ -13,7 +13,7 @@ final class Joystick {
         var title: String {
             switch self {
             case .off: return "Off"
-            case .keyboard: return "Keyboard (Arrow Keys, Option = Buttons)"
+            case .keyboard: return "Keyboard (Arrow Keys; Left Option, ` = Buttons)"
             case .mouse: return "Mouse (Click = Button 0, Right-Click = Button 1)"
             case .controller: return "Game Controller (A, B = Buttons)"
             }
@@ -28,6 +28,8 @@ final class Joystick {
     private static let left: UInt16 = 123, right: UInt16 = 124, down: UInt16 = 125, up: UInt16 = 126
     private var arrows = Set<UInt16>()
     private var optionButtons = [false, false]
+    private var graveButton = false      // ` ~ key, button 1
+    private static let grave: UInt16 = 50
     private var mouseButtons = [false, false]
     private var padButtons = [false, false]
 
@@ -56,6 +58,16 @@ final class Joystick {
     func setOptionButton(_ n: Int, down: Bool) {
         optionButtons[n] = down
         applyButtons()
+    }
+
+    /// While a joystick mode is on, the ` ~ key (left of 1) is button 1, so both
+    /// buttons sit under the left hand with left Option as button 0. Returns
+    /// true if the key was taken (and should not reach the Apple II keyboard).
+    func handleButtonKey(_ keyCode: UInt16, down: Bool) -> Bool {
+        guard mode != .off, keyCode == Self.grave else { return false }
+        graveButton = down
+        applyButtons()
+        return true
     }
 
     // MARK: Mouse
@@ -96,12 +108,13 @@ final class Joystick {
 
     private func applyButtons() {
         for n in 0..<2 {
-            emulator.setButton(Int32(n), down: optionButtons[n] || mouseButtons[n] || padButtons[n])
+            emulator.setButton(Int32(n), down: optionButtons[n] || (n == 1 && graveButton) || mouseButtons[n] || padButtons[n])
         }
     }
 
     private func recentre() {
         arrows.removeAll()
+        graveButton = false
         mouseButtons = [false, false]
         padButtons = [false, false]
         emulator.setPaddle(0, 127)

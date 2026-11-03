@@ -98,6 +98,9 @@ final class ScreenView: NSView {
             super.keyDown(with: event)
             return
         }
+        if joystick?.handleButtonKey(event.keyCode, down: true) == true {
+            return                       // ` ~ key: joystick button 1
+        }
         if joystick?.handleArrow(event.keyCode, down: true) == true {
             return                       // arrows are the joystick in keyboard mode
         }
@@ -121,6 +124,9 @@ final class ScreenView: NSView {
     }
 
     override func keyUp(with event: NSEvent) {
+        if joystick?.handleButtonKey(event.keyCode, down: false) == true {
+            return
+        }
         if joystick?.handleArrow(event.keyCode, down: false) == true {
             return
         }

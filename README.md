@@ -30,7 +30,7 @@ and a thin Swift/AppKit front end. **CGC** stands for **C**heon**g**gye**c**heon
   - Band-limited step synthesis keeps the square waves clean, and a jitter buffer with rate control prevents dropouts.
 - **Hard disk** (slot 7): a ProDOS block device with built-in firmware, so no ROM is needed. It mounts `.hdv`/`.po` images up to 32 MB and ProDOS-order `.2mg` images (see below).
 - **Passport MIDI** (slot 2): a 6840 PTM and a 6850 ACIA, played on macOS's built-in General MIDI synthesizer.
-- **Joystick**: from the arrow keys, the mouse, or a game controller (GameController framework). The Option keys work as buttons 0 and 1 (Open/Closed Apple on the //e).
+- **Joystick**: from the arrow keys, the mouse, or a game controller (GameController framework). The Option keys work as buttons 0 and 1 (Open/Closed Apple on the //e), and while a joystick mode is on the `` ` `` key (left of 1) is also button 1, so both buttons are under the left hand.
 - **Hangul**: runs CALL3327, the 1986 Korean Hangul I/O program. Its disk is inserted by default when it is present (see below).
 
 ## Building
@@ -157,6 +157,7 @@ emulator through one I/O register.
 | ⌘L | Scanlines |
 | ⌘V | Type the clipboard |
 | Left / right Option | Joystick buttons 0 / 1 (Open / Closed Apple) |
+| `` ` `` (left of 1) | Joystick button 1 while a joystick mode is on |
 
 ## Tests
 
