@@ -138,7 +138,7 @@ static void encode_sector(bitwriter *w, int track, int sector, const uint8_t *da
 
 static bool alloc_track(disk_drive *dr, int t, uint32_t max_bits)
 {
-    dr->bits[t] = calloc((max_bits + 7) / 8, 1);
+    dr->bits[t] = calloc(((size_t)max_bits + 7) / 8, 1);
     return dr->bits[t] != NULL;
 }
 
@@ -225,6 +225,8 @@ static bool load_woz(disk_drive *dr, const uint8_t *data, size_t len)
             memcpy(dr->tmap, body, DISK_QTRACKS);
             have_tmap = true;
         } else if (memcmp(id, "TRKS", 4) == 0) {
+            if (have_trks)
+                return false;
             if (version == 1) {
                 // WOZ1: fixed 6656-byte records (6646 bytes of bits, then bytes used and bit count).
                 int n = (int)(size / 6656);
@@ -243,10 +245,13 @@ static bool load_woz(disk_drive *dr, const uint8_t *data, size_t len)
                     return false;
                 for (int t = 0; t < DISK_QTRACKS; t++) {
                     const uint8_t *e = body + t * 8;
-                    uint32_t start = rd16le(e), bits = rd32le(e + 4);
-                    size_t bytes = (bits + 7) / 8;
-                    if (start == 0 || bits == 0 || (size_t)start * 512 + bytes > len || !alloc_track(dr, t, bits))
+                    uint32_t start = rd16le(e), blocks = rd16le(e + 2), bits = rd32le(e + 4);
+                    if (start == 0 && blocks == 0 && bits == 0)
                         continue;
+                    size_t bytes = ((size_t)bits + 7) / 8;
+                    if (start < 3 || bits == 0 || bytes > (size_t)blocks * 512 ||
+                        (size_t)start * 512 + (size_t)blocks * 512 > len || !alloc_track(dr, t, bits))
+                        return false;
                     memcpy(dr->bits[t], data + (size_t)start * 512, bytes);
                     dr->bit_count[t] = bits;
                     dr->track_count = t + 1;
@@ -480,8 +485,10 @@ bool disk2_insert(disk2 *d, int drive, const uint8_t *data, size_t len, a2_disk_
 {
     if (drive != 0 && drive != 1)
         return false;
-    disk_drive *dr = &d->drive[drive];
-    drive_clear(dr);
+    disk_drive replacement = {0};
+    disk_drive *dr = &replacement;
+    dr->halftrack = d->drive[drive].halftrack;
+    memset(dr->tmap, 0xFF, sizeof dr->tmap);
     bool ok;
     switch (fmt) {
     case A2_DISK_WOZ:
@@ -503,6 +510,8 @@ bool disk2_insert(disk2 *d, int drive, const uint8_t *data, size_t len, a2_disk_
     dr->format = fmt;
     dr->present = true;
     dr->write_protected = wp;
+    drive_clear(&d->drive[drive]);
+    d->drive[drive] = replacement;
     return true;
 }
 

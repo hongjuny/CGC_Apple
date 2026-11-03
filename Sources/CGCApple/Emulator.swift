@@ -65,16 +65,20 @@ final class Emulator {
     /// Replaces the machine with another model, keeping disks and display settings.
     func switchModel(to newModel: a2_model) throws {
         guard newModel != model, let dir = romDir else { return }
-        saveAllDisks()
-        let old = a2, oldModel = model
+        try saveAllDisks()
+        let old = a2, oldModel = model, oldHasDiskROM = hasDiskROM
         a2 = a2_create(newModel)
         model = newModel
         do {
             try loadROMs(from: dir)
+            for (drive, url) in diskURLs.enumerated() {
+                if let url { try insertDisk(url, drive: drive) }
+            }
         } catch {
             a2_destroy(a2)
             a2 = old
             model = oldModel
+            hasDiskROM = oldHasDiskROM
             throw error
         }
         a2_destroy(old)
@@ -82,9 +86,6 @@ final class Emulator {
         a2_set_scanlines(a2, scanlines)
         a2_set_mockingboards(a2, Int32(mockingboards))
         a2_set_midi_slot(a2, Int32(midiSlot))
-        for (drive, url) in diskURLs.enumerated() {
-            if let url { try? insertDisk(url, drive: drive) }
-        }
         powerCycle()
     }
 
@@ -265,7 +266,7 @@ final class Emulator {
     var activeDrive: Int { Int(a2_disk_active_drive(a2)) }
 
     func insertDisk(_ url: URL, drive: Int) throws {
-        saveDisk(drive: drive)
+        try saveDisk(drive: drive)
         let data = try Data(contentsOf: url)
         let format: a2_disk_format
         switch url.pathExtension.lowercased() {
@@ -289,26 +290,29 @@ final class Emulator {
         diskURLs[drive] = url
     }
 
-    func ejectDisk(drive: Int) {
-        saveDisk(drive: drive)
+    func ejectDisk(drive: Int) throws {
+        try saveDisk(drive: drive)
         a2_disk_eject(a2, Int32(drive))
         diskURLs[drive] = nil
     }
 
     /// Writes a modified disk back to its file.
-    func saveDisk(drive: Int) {
+    func saveDisk(drive: Int) throws {
         guard let url = diskURLs[drive], a2_disk_dirty(a2, Int32(drive)) else { return }
         var buf = [UInt8](repeating: 0, count: a2_disk_export_size(a2, Int32(drive)))
         let n = buf.withUnsafeMutableBufferPointer {
             a2_disk_export(a2, Int32(drive), $0.baseAddress, $0.count)
         }
-        if n > 0 {
-            try? Data(buf[0..<n]).write(to: url, options: .atomic)
+        guard n > 0 else {
+            throw NSError(domain: "CGCApple", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "Could not export \(url.lastPathComponent). The disk remains inserted.",
+            ])
         }
+        try Data(buf[0..<n]).write(to: url, options: .atomic)
     }
 
-    func saveAllDisks() {
-        saveDisk(drive: 0)
-        saveDisk(drive: 1)
+    func saveAllDisks() throws {
+        try saveDisk(drive: 0)
+        try saveDisk(drive: 1)
     }
 }

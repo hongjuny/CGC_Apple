@@ -15,5 +15,10 @@ let package = Package(
             dependencies: ["A2Core"],
             path: "Sources/CGCApple"
         ),
+        .testTarget(
+            name: "CGCAppleTests",
+            dependencies: ["CGCApple", "A2Core"],
+            path: "tests/Swift"
+        ),
     ]
 )

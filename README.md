@@ -80,7 +80,9 @@ them on the window; the right half of the window is drive 2.
 
 **Note:** when a program writes to a disk, the image file you opened is updated
 when the disk is ejected or the app quits. Keep backups of images you care
-about, especially WOZ images.
+about, especially WOZ images. If saving fails, the app reports the error and
+keeps the disk inserted; ejecting, replacing the disk, switching models and
+quitting are stopped until saving succeeds.
 
 ### Typing Hangul with CALL3327 (3327 한글)
 
@@ -112,11 +114,13 @@ The macOS input source does not matter (한글 입력기를 켜 두어도 됩니
 
 ## Tests
 
+`swift test` checks disk save failures and model-switch rollback in the Swift wrapper.
+
 The headless tests in `tests/` build against the C core with clang:
 
 - `cputest.c`: Klaus Dormann's 6502 and 65C02 functional tests. Download the binaries from [Klaus2m5/6502_65C02_functional_tests](https://github.com/Klaus2m5/6502_65C02_functional_tests); they are not included.
 - `boottest.c`: boots ROMs and disks, types keys, dumps the text screen and screenshots.
-- `disktest.c`: round trips between `.dsk`, `.po`, `.nib` and WOZ 2.
+- `disktest.c`: round trips between `.dsk`, `.po`, `.nib` and WOZ 2, plus malformed-image rejection and preservation of inserted disks.
 - `mbtest.c`: Mockingboard tone frequency, channel separation and VIA timer IRQ rate.
 - `miditest.c`: Passport MIDI ACIA byte stream and rate, and PTM IRQ rate.
 

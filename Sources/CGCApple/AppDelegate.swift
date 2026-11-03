@@ -3,7 +3,7 @@ import A2Core
 import UniformTypeIdentifiers
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let emulator = Emulator(model: AppDelegate.savedModel())
     private lazy var joystick = Joystick(emulator: emulator)
     private var window: NSWindow!
@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         window = NSWindow(contentRect: screen.frame, styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered, defer: false)
+        window.delegate = self
         window.title = "CGC " + Emulator.name(of: emulator.model)
         window.contentView = screen
         window.contentAspectRatio = screen.frame.size
@@ -68,8 +69,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        emulator.saveAllDisks()
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        saveDisks() ? .terminateNow : .terminateCancel
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool { saveDisks() }
+
+    private func saveDisks() -> Bool {
+        do {
+            try emulator.saveAllDisks()
+            return true
+        } catch {
+            NSAlert(error: error).runModal()
+            return false
+        }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -239,10 +252,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func insertDisk1() { chooseDisk(drive: 0) }
     @objc private func insertDisk2() { chooseDisk(drive: 1) }
-    @objc private func ejectDisk1() { emulator.ejectDisk(drive: 0) }
-    @objc private func ejectDisk2() { emulator.ejectDisk(drive: 1) }
+    private func ejectDisk(drive: Int) {
+        do {
+            try emulator.ejectDisk(drive: drive)
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+
+    @objc private func ejectDisk1() { ejectDisk(drive: 0) }
+    @objc private func ejectDisk2() { ejectDisk(drive: 1) }
     @objc private func reset() { emulator.reset() }
-    @objc private func powerCycle() { emulator.saveAllDisks(); emulator.powerCycle() }
+    @objc private func powerCycle() {
+        if saveDisks() { emulator.powerCycle() }
+    }
 
     @objc private func togglePause(_ sender: NSMenuItem) {
         paused.toggle()

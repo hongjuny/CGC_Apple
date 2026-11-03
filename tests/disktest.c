@@ -51,6 +51,38 @@ static bool via(const uint8_t *img, a2_disk_format fmt, const char *save_path)
     return ok;
 }
 
+static bool rejected_preserves_disk(const uint8_t *img, a2_disk_format fmt,
+                                    const uint8_t *bad, size_t len)
+{
+    apple2 *a = a2_create(A2_MODEL_IIPLUS);
+    bool ok = a2_disk_insert(a, 0, img, A2_DSK_SIZE, A2_DISK_DOS_ORDER, false);
+    ok = ok && !a2_disk_insert(a, 0, bad, len, fmt, false) && a2_disk_present(a, 0);
+    size_t n;
+    uint8_t *out = export_as(a, A2_DISK_DOS_ORDER, &n);
+    ok = ok && same_as(img, out, n);
+    free(out);
+    a2_destroy(a);
+    return ok;
+}
+
+static bool rejects_bad_woz(const uint8_t *img)
+{
+    apple2 *a = a2_create(A2_MODEL_IIPLUS);
+    a2_disk_insert(a, 0, img, A2_DSK_SIZE, A2_DISK_DOS_ORDER, false);
+    size_t n;
+    uint8_t *woz = export_as(a, A2_DISK_WOZ, &n);
+    a2_destroy(a);
+    if (!woz || n < 1536) { free(woz); return false; }
+    memset(woz + 8, 0, 4); // CRC 0 disables the checksum for malformed-track tests.
+    memset(woz + 260, 0xFF, 4); // First TRK bit count: UINT32_MAX.
+    bool ok = rejected_preserves_disk(img, A2_DISK_WOZ, woz, n);
+    woz[260] = 1; woz[261] = woz[262] = woz[263] = 0;
+    woz[258] = woz[259] = 0; // Nonempty track with no allocated blocks.
+    ok = ok && rejected_preserves_disk(img, A2_DISK_WOZ, woz, n);
+    free(woz);
+    return ok;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2) {
@@ -76,5 +108,7 @@ int main(int argc, char **argv)
     }
     failures += check("dsk -> WOZ2 -> dsk", via(img, A2_DISK_WOZ, argc > 2 ? argv[2] : NULL));
     failures += check("dsk -> nib -> dsk", via(img, A2_DISK_NIBBLE, NULL));
+    failures += check("invalid insert keeps disk", rejected_preserves_disk(img, A2_DISK_DOS_ORDER, img, 1));
+    failures += check("malformed WOZ keeps disk", rejects_bad_woz(img));
     return failures ? 1 : 0;
 }
