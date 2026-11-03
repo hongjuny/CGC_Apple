@@ -44,8 +44,20 @@ final class EmulatorDiskTests: XCTestCase {
 
         try fm.moveItem(at: moved, to: disks)
         try emulator.saveAllDisks()
+
+        // Once saved the disk is clean, so saving again does not rewrite the file.
+        try fm.removeItem(at: disk)
+        try emulator.saveAllDisks()
+        XCTAssertFalse(fm.fileExists(atPath: disk.path))
+
+        // Unsaved writes can be discarded when the file cannot be written.
+        emulator.runFrame()
+        try fm.moveItem(at: disks, to: moved)
+        XCTAssertThrowsError(try emulator.saveAllDisks())
+        emulator.discardDiskChanges(drive: 0)
         try emulator.ejectDisk(drive: 0)
         XCTAssertNil(emulator.diskURLs[0])
+        try fm.moveItem(at: moved, to: disks)
 
         // Disk reload failure during a model change must roll back the machine.
         try Data(repeating: 0, count: 0x4000).write(to: root.appendingPathComponent("Apple2e.rom"))

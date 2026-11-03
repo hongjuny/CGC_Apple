@@ -55,8 +55,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         do {
             try emulator.setRamWorks(UserDefaults.standard.bool(forKey: Self.ramWorksKey))
+        } catch {
+            UserDefaults.standard.set(false, forKey: Self.ramWorksKey)
+            NSAlert(error: error).runModal()
+        }
+        do {
             try emulator.setRamFactor(UserDefaults.standard.bool(forKey: Self.ramFactorKey))
         } catch {
+            UserDefaults.standard.set(false, forKey: Self.ramFactorKey)
             NSAlert(error: error).runModal()
         }
         emulator.powerCycle()
@@ -83,14 +89,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     func windowShouldClose(_ sender: NSWindow) -> Bool { saveDisks() }
 
-    private func saveDisks() -> Bool {
-        do {
-            try emulator.saveAllDisks()
-            return true
-        } catch {
-            NSAlert(error: error).runModal()
-            return false
+    /// Saves modified disks. If saving fails, asks whether to discard the
+    /// changes; returns false only when the user cancels.
+    private func saveDisks(drives: [Int] = [0, 1]) -> Bool {
+        for drive in drives {
+            do {
+                try emulator.saveDisk(drive: drive)
+            } catch {
+                guard confirmDiscard(drive: drive, error: error) else { return false }
+                emulator.discardDiskChanges(drive: drive)
+            }
         }
+        return true
+    }
+
+    private func confirmDiscard(drive: Int, error: Error) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Could not save the disk in drive \(drive + 1)"
+        alert.informativeText = error.localizedDescription
+            + "\n\nDiscard the changes made to this disk, or cancel and keep it inserted?"
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Discard Changes")
+        return alert.runModal() == .alertSecondButtonReturn
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -238,6 +259,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     // MARK: Actions
 
     private func insert(_ url: URL, drive: Int) {
+        guard saveDisks(drives: [drive]) else { return }
         do {
             try emulator.insertDisk(url, drive: drive)
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
@@ -259,6 +281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc private func insertDisk1() { chooseDisk(drive: 0) }
     @objc private func insertDisk2() { chooseDisk(drive: 1) }
     private func ejectDisk(drive: Int) {
+        guard saveDisks(drives: [drive]) else { return }
         do {
             try emulator.ejectDisk(drive: drive)
         } catch {
@@ -318,8 +341,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     @objc private func toggleMemoryCard(_ sender: NSMenuItem) {
+        guard saveDisks() else { return }
         do {
-            try emulator.saveAllDisks()
             if sender.tag == 0 {
                 try emulator.setRamWorks(!emulator.ramWorksEnabled)
                 UserDefaults.standard.set(emulator.ramWorksEnabled, forKey: Self.ramWorksKey)

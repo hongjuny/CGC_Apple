@@ -109,6 +109,8 @@ bool a2_disk_insert(apple2 *a2, int drive, const uint8_t *data, size_t len,
 void a2_disk_eject(apple2 *a2, int drive);
 bool a2_disk_present(const apple2 *a2, int drive);
 bool a2_disk_dirty(const apple2 *a2, int drive);
+// Clears the modified flag, after the image is saved or its changes are discarded.
+void a2_disk_mark_clean(apple2 *a2, int drive);
 // Writes the (possibly modified) image back in its original format into out.
 // a2_disk_export_size gives the buffer size needed. Returns the number of
 // bytes written, or 0 on failure.

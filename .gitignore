@@ -20,6 +20,9 @@ disks/
 *.woz
 *.2mg
 
+# Local Claude Code settings
+.claude/
+
 # Scratch output
 *.ppm
 .DS_Store

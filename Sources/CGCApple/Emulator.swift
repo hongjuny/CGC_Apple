@@ -344,6 +344,12 @@ final class Emulator {
             ])
         }
         try Data(buf[0..<n]).write(to: url, options: .atomic)
+        a2_disk_mark_clean(a2, Int32(drive))
+    }
+
+    /// Forgets unsaved writes so the disk can be ejected or the app closed without saving.
+    func discardDiskChanges(drive: Int) {
+        a2_disk_mark_clean(a2, Int32(drive))
     }
 
     func saveAllDisks() throws {

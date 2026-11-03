@@ -341,7 +341,8 @@ static void mem_write(void *ctx, uint16_t addr, uint8_t value)
         a2->ramfactor_c800 = true;
     } else if (addr == 0xCFFF) {
         a2->ramfactor_c800 = false;
-        a2->intc8rom = false;
+        if (a2_is_iie(a2))
+            a2->intc8rom = false;
     }
 }
 
@@ -686,6 +687,12 @@ bool a2_disk_present(const apple2 *a2, int drive)
 bool a2_disk_dirty(const apple2 *a2, int drive)
 {
     return a2_disk_present(a2, drive) && a2->disk.drive[drive].dirty;
+}
+
+void a2_disk_mark_clean(apple2 *a2, int drive)
+{
+    if (drive == 0 || drive == 1)
+        a2->disk.drive[drive].dirty = false;
 }
 
 size_t a2_disk_export_size_as(const apple2 *a2, int drive, a2_disk_format format)
