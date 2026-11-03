@@ -1,0 +1,25 @@
+# Build output
+.build/
+build/
+tests/data/
+
+# Third-party code checked out next to the project for reference
+mame/
+
+# ROMs and disk images are copyrighted and never committed
+roms/
+disks/
+*.rom
+*.ROM
+*.bin
+*.chr
+*.dsk
+*.do
+*.po
+*.nib
+*.woz
+*.2mg
+
+# Scratch output
+*.ppm
+.DS_Store

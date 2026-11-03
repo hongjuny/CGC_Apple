@@ -1,0 +1,4 @@
+-ISources/A2Core/include
+-ISources/A2Core
+-std=c11
+-Wall
